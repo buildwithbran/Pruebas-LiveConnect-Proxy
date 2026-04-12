@@ -2,6 +2,8 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from services.realtime import publish
+
 DB_NAME = "database.db"
 
 
@@ -227,6 +229,17 @@ class SQLiteRepository:
                     normalized_metadata,
                 ),
             )
+
+        publish(
+            "message.updated",
+            {
+                "conversation_id": normalized_conversation_id,
+                "canal": normalized_canal,
+                "sender": normalized_sender,
+                "message_type": normalized_message_type,
+                "contact_name": normalized_contact_name,
+            },
+        )
         return True
 
     def list_conversations(self):

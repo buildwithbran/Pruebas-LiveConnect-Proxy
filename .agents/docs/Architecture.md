@@ -1,177 +1,35 @@
-# Architecture — LiveConnect Proxy
+# Architecture — LiveConnect Proxy v1
 
-## Overview
+## Resumen
 
-The system processes messaging through a proxy using a webhook-based flow.
+La arquitectura AI-first separa tres capas:
 
-It is composed of:
+- `Agents.md`: indice de entrada para Codex.
+- `.agents/`: contexto minimo, skills y fichas de agentes.
+- `Pruebas LC/Messaging_platform/`: runtime Python que expone HTTP, orquesta flujos y persiste datos.
 
-- Router (entry point)
-- Agents (decision layer)
-- Skills (execution layer)
-- Memory (state persistence)
+## Runtime
 
----
+- `core/message_router.py`: resuelve la operacion interna desde la ruta HTTP.
+- `core/webhook_processor.py`: pipeline `parse_payload -> validate_message -> store_message`.
+- `core/outbound_message_agent.py`: agrupa envio de mensajes, archivos, quick answers y transferencias.
+- `core/configuration_agent.py`: agrupa webhook config, balance y canales.
+- `services/liveconnect/`: adaptadores atómicos contra la API de LiveConnect.
+- `services/webhook/`: normalizacion y persistencia de mensajes entrantes.
+- `DB/` e `Inbox/`: infraestructura existente de almacenamiento y lectura.
 
-## Core Flow
+## Flujos clave
 
-Input → Router → Agent → Skills → Memory → Response
+- Webhook:
+  `POST /webhook/liveconnect` -> `MessageRouter` -> `WebhookProcessor` -> SQLite
+- Outbound:
+  `POST /sendMessage|/sendFile|/sendQuickAnswer|/transfer` -> `MessageRouter` -> `OutboundMessageAgent` -> LiveConnect API
+- Config:
+  `POST /setWebhook|/getWebhook`, `GET /balance`, `GET /config/channels` -> `MessageRouter` -> `ConfigurationAgent`
 
----
+## Principios
 
-## Inputs
-
-The system can receive:
-
-- Webhook events (incoming messages)
-- API requests (sendMessage, sendFile, etc.)
-- UI actions (Inbox interactions)
-
----
-
-## Components
-
-### Router
-
-- Entry point of the system
-- Receives all requests
-- Classifies request type
-- Routes to the correct agent
-
-Rules:
-- No business logic
-- No data transformation
-- Fast execution
-
----
-
-### Agents
-
-- Decide what action to perform
-- Orchestrate skills
-- Handle errors
-
-Examples:
-
-- WebhookProcessor
-- SendMessageAgent
-- ConfigurationAgent
-- ErrorHandler
-
----
-
-### Skills
-
-- Atomic operations
-- Stateless
-- Reusable
-- Input/Output defined
-
-Examples:
-
-- parse payload
-- validate message
-- store message
-- send to provider
-- log event
-
-Rules:
-- No internal state
-- No side effects outside scope
-- Always return structured output
-
----
-
-### Memory
-
-#### Short-Term (Cache)
-- Tokens
-- Temporary state
-- Rate limits
-
-#### Long-Term (Database)
-- Conversations
-- Messages
-- Files
-- Logs
-
----
-
-## Execution Flow
-
-1. Receive input
-2. Router classifies request
-3. Agent is selected
-4. Agent executes required skills
-5. Data is stored
-6. Response is returned
-
----
-
-## Message Types
-
-- Text
-- File (URL-based)
-- Quick Answer
-
----
-
-## Execution Rules
-
-- Always route before processing
-- Use skills for all operations
-- Do not implement logic inside agents if a skill exists
-- Keep execution minimal and deterministic
-
----
-
-## Patterns
-
-### Sequential
-
-parse → validate → store
-
-### Conditional
-
-if valid → process
-else → error
-
-### Parallel
-- Independent tasks can run simultaneously
-
----
-
-## Error Handling
-
-- Fail fast on invalid input
-- Retry on temporary failures (timeout / 5xx)
-- Do not retry on client errors (4xx)
-
----
-
-## Performance Guidelines
-
-- Keep webhook response under 2 seconds
-- Minimize number of steps
-- Avoid unnecessary processing
-- Use only required skills
-
----
-
-## Design Principles
-
-- Stateless execution
-- Separation of concerns
-- Skill-based architecture
-- Minimal reasoning
-- Deterministic behavior
-
----
-
-## References
-
-See:
-
-- Architecture-Deep.md (full system design)
-- RuntimeFlow.md (execution details)
-- Skills/ (available actions)
+- `App.py` no contiene logica de negocio.
+- Los agentes orquestan; los servicios ejecutan.
+- Los skills AI documentan contratos y capacidades, no implementacion Python.
+- Las rutas alias mantienen compatibilidad y comparten el mismo handler interno.

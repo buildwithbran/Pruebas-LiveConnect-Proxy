@@ -24,6 +24,87 @@ Se aplico una mejora incremental en backend y frontend siguiendo principios SOLI
 - Se agregaron tests unitarios deterministas en `Pruebas LC/Messaging_platform/tests/`.
 - Ejecucion: `python3 -m unittest discover -s tests -v` (actualmente en verde).
 
+## Mejoras de UI/UX y Sincronización Evento-Dirigida (12 de abril de 2026)
+
+### UI/UX Retro-Futurístico Industrial
+Se aplicó la habilidad `frontend-design` para transformar la interfaz con una estética distintiva y memorable.
+
+**Tipografía**
+- Google Fonts: `IBM Plex Mono` (monospace técnico) + `Courier Prime` (retro typewriter)
+- Reemplazo de stack genérico (`Avenir Next`, `Segoe UI`) por fuentes characterful
+
+**Tema Neon Industrial (6º tema)**
+- **Colores primarios**: Cyan neon `#00d4ff`, Magenta `#ff006e`
+- **Accents**: Cyan brillante `#00ffff`, Hot pink `#ff3366`
+- **Base**: Navy profundo con overlay de grid retro `#0a0f1f`
+- **Shadows**: Dobles sombras neon (cyan + magenta, 20-40px blur) para efecto neón auténtico
+
+**Animaciones y Motion**
+- `@keyframes staggerIn`: Fade/slide on-load con stagger de 100-150ms entre elementos
+- `@keyframes neonGlow`: Pulse 3-4s repetido con intensidad variable (cyan + magenta)
+- `@keyframes glitch`: Efecto glitch retro para máxima fidelidad visual
+- Aplicadas a componentes críticos: `.icon-button--neon`, `.insight-card--neon-pulse`, `.insight-card--neon-glow`
+
+**Detalles Visuales**
+- `.theme-panel--metallic`: Inset borders neon + effect de relieve metallic
+- Grid backdrop: Patrón 28x28px en overlay semi-transparente (0.8 opacity)
+- Border gradients: Transiciones diagonales en elementos key
+- Seletor de temas: 6 opciones visuales (light, dark, sage, sunset, midnight-blue, neon-industrial)
+
+**Archivos modificados**
+- `Pruebas LC/Messaging_platform/templates/index.html`: Links de Google Fonts, 6º swatch en selector
+- `Pruebas LC/Messaging_platform/static/main.css`: Variables neon, @keyframes, estilos actualiza
+- `Pruebas LC/Messaging_platform/static/main.js`: Registro de tema en array `THEMES`
+
+### Sincronización Evento-Dirigida Pura (Event-Driven SSE)
+Se optimizó la sincronización para eliminar polling automático fallback y proporcionar visibilidad total del estado SSE.
+
+**Arquitectura**
+- **Backend**: `/events/stream` (SSE) dispara `publish("message.updated")` cuando webhook guarda mensaje
+- **Frontend**: `connectEventStream()` escucha eventos SSE e invoca `loadConversations()` / `loadMessages()`
+- **Webhook flow**: Payload → WebhookProcessor → store_message → repository.save_message() → publish() → SSE → UI
+
+**Indicador Visual de Conexión**
+- **Panel de estado** (sidebar superior): Conexión SSE con emoji + color
+  - 🟢 **Conectado**: SSE activo, eventos en tiempo real (color: `var(--brand)`)
+  - 🔴 **Sin conexión**: SSE down, requiere refresco manual (color: `var(--danger)`)
+- **Estado inicial**: 🔴 "Conectando..." → 🟢 "Conectado" (0-2s)
+- **Reconexión automática**: Si SSE falla, reintenta cada 3s con logging visible
+
+**Botón "Actualizar" Manual**
+- Ubicado en panel de estado (inline con indicador SSE)
+- Acción: Refresca conversaciones + mensajes actuales con `refreshNow()`
+- **Crítico**: Sin polling automático fallback, solo manual si usuario lo requiere
+
+**Mejoras en Logging (Dev Console)**
+- `✅ SSE conectado` cuando stream.ready
+- `📨 Evento recibido: message.updated` por cada evento SSE
+- `⚠️ SSE desconectado, reconectando...` cuando falla ConnectionError
+- `❌ Error procesando evento: <error>` si JSON parse falla
+- Todos los logs son visibles en navegador DevTools → Console
+
+**Cambios en Frontend**
+- `updateSSEIndicator()`: Nueva función que sincroniza visual 🟢/🔴 con estado `state.eventStreamConnected`
+- `connectEventStream()` mejorado: Logging, reconexión automática, mejor manejo de errores
+- `refreshNow()`: Nueva acción para refresco manual explícito (sin esperar evento)
+- `dom.sseStatus`, `dom.refreshNowBtn`: Nuevas referencias del DOM
+
+**Cambios en HTML**
+- Reemplazo de insight-card "Estado: Sincronización activa" por "Conexión SSE: [🟢/🔴]"
+- Nuevo elemento `id="sseStatus"` (strong) para indicador
+- Nuevo elemento `id="refreshNowBtn"` (inline link) para botón Actualizar
+- Clase `.insight-card--neon-pulse` aplicada para visibilidad neon
+
+**Arquitectura Confirmada**
+- No había polling escondido (`setInterval`/`setTimeout` con 5s/2s)
+- `state.eventStreamConnected` es la fuente de verdad
+- Si EventSource no está disponible (navegador viejo), toast informa + fallback manual
+- Reconexión es automática pero visible (no silenciosa)
+
+**Archivos modificados**
+- `Pruebas LC/Messaging_platform/templates/index.html`: Nuevo panel SSE + botón Actualizar
+- `Pruebas LC/Messaging_platform/static/main.js`: `updateSSEIndicator()`, `connectEventStream()` mejorado, `refreshNow()`, binding de eventos
+
 ## Estructura del repositorio
 - `README.md`
   Descripción general y advertencia de uso interno.
@@ -146,21 +227,39 @@ Todos usan `PageGearToken` en headers.
 Archivos:
 - `Pruebas LC/Messaging_platform/templates/index.html`
 - `Pruebas LC/Messaging_platform/static/main.js`
+- `Pruebas LC/Messaging_platform/static/main.css`
 
 ### Funcionalidades
-- Sidebar con conversaciones (recarga cada 5s).
-- Chat central con mensajes.
-- Acciones UI por `data-action` (sin `onclick` inline).
-- Acciones rápidas:
+- **Sidebar con conversaciones**: Actualiza por eventos SSE (no polling cada 5s como antes)
+- **Chat central con mensajes**: Sincronización en tiempo real via EventStream
+- **Indicador SSE visual**: 🟢 Conectado / 🔴 Sin conexión en panel de estado
+- **Botón "Actualizar" manual**: Refresco explícito sin esperar eventos (para fallback)
+- **Selector de temas (6 opciones)**: light, dark, sage, sunset, midnight-blue, **neon-industrial**
+- **Acciones UI** por `data-action` (sin `onclick` inline):
   - `Saldo` → `/balance`
   - `QuickAnswer` → `/sendQuickAnswer` con `id_respuesta` fijo
   - `Transferir` → `/transfer` con `id_canal` fijo
+  - `refreshNow` → Refresco manual de conversaciones/mensajes
 
-### Principios de diseno aplicados en frontend
-- SRP: funciones separadas para render, API y eventos.
-- DRY: helper central para `fetch` GET/POST y validación de respuesta.
-- KISS: flujo de inicialización simple (`initApp` + `bindEvents` + polling).
-- Separation of Concerns: HTML declara acciones; JS orquesta comportamiento.
+### Tipografía y Estilo
+- **Font family**: `IBM Plex Mono`, `Courier Prime`, monospace (actualizado de Avenir Next / Segoe UI)
+- **Temas visuales**: 6 temas CSS con variables declarativas
+- **Neon Industrial (nuevo)**: Colores neon cyan/magenta, animaciones glow/glitch, grid retro backdrop
+- **Responsive**: Mobile-first, breakpoints adaptables
+- **Accesibilidad**: ARIA labels, semantic HTML, contrast ratios WCAG AA
+
+### Principios de diseño aplicados en frontend
+- **SRP**: Funciones separadas para render, API y eventos
+- **DRY**: Helper central para `fetch` GET/POST y validación de respuesta
+- **Event-Driven**: Sincronización via SSE, no polling sistemático
+- **Separation of Concerns**: HTML declara acciones; JS orquesta comportamiento
+- **Distinction**: UI retro-futurística inherentemente memorable (no genérica)
+
+### Sincronización Real-Time
+- **SSE (EventSource)**: Escucha `/events/stream`, recibe `message.updated` eventos
+- **Reconexión automática**: 3s si se desconecta, visible en console
+- **Logging detallado**: Console muestra estado SSE, eventos recibidos, errores
+- **Fallback manual**: Si SSE falla, usuario puede usar "Actualizar" (sin polling automático)
 
 ### Observación clave
 - Al enviar `sendMessage`, no se inserta en SQLite, por lo que la conversación solo refleja mensajes entrantes (webhook), no los salientes, a menos que LiveConnect los devuelva vía webhook.

@@ -2,31 +2,22 @@
   "version": 1,
   "skills": {
     "proxy-liveconnect": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "sourceType": "local",
-      "path": "./skills/proxy-liveconnect",
+      "path": "./Skills/skill-proxy-lc",
       "actions": [
+        "parse-payload",
+        "validate-message",
+        "store-message",
         "send-message",
         "send-file",
+        "send-quick-answer",
         "transfer",
-        "webhook",
-        "balance"
+        "set-webhook",
+        "get-webhook",
+        "get-balance",
+        "get-channels"
       ]
-    },
-    "python-backend": {
-      "source": "jiatastic/open-python-skills",
-      "sourceType": "github",
-      "computedHash": "3e05cfe0d22005cd76126b0a7d67e1b33da8a08da99d863133a37abfd47365a0"
-    },
-    "python-resilience": {
-      "source": "wshobson/agents",
-      "sourceType": "github",
-      "computedHash": "2f109425df447de4618fed93808ecea89e037c07ab1d2676cf7349d0d320c885"
-    },
-    "web-perf": {
-      "source": "cloudflare/skills",
-      "sourceType": "github",
-      "computedHash": "7ae53856c320574f7440f50aef7892f96837eec9fd49d329d049d432fb4b299a"
     }
   }
 }

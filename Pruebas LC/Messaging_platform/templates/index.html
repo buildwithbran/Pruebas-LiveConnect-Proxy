@@ -2,144 +2,280 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LiveConnect Inbox</title>
+  <!-- Google Fonts: IBM Plex Mono & Courier Prime -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
-
 </head>
 <body>
+  <div class="app-frame">
+    <aside class="sidebar-shell">
+      <div class="sidebar-panel">
+        <div class="sidebar-header">
+          <div class="sidebar-copy">
+            <p class="eyebrow">LiveConnect®</p>
+            <h1>Proxy Inbox</h1>
+            <p class="sidebar-description">Centro operativo para conversaciones, webhooks, archivos y automatizaciones del proxy.</p>
+          </div>
+          <div id="configButton" class="config-shortcut">
+            <button type="button" class="icon-button" data-action="openSettings" title="Configuración">⚙</button>
+          </div>
+        </div>
 
-<!-- Botón Configuración dentro del header -->
-  <div id="configButton">
-    <button type="button" data-action="openSettings" title="Configuracion">⚙</button>
+        <div class="sidebar-insights">
+          <article class="insight-card insight-card--neon-pulse">
+            <span class="insight-label">Conexión SSE</span>
+            <strong id="sseStatus">🔴 Conectando...</strong>
+            <span class="insight-meta">Eventos en tiempo real · <a href="#" id="refreshNowBtn" style="cursor:pointer;text-decoration:underline">Actualizar</a></span>
+          </article>
+          <article class="insight-card insight-card--accent">
+            <span class="insight-label">Bandeja</span>
+            <strong id="conversationCount">0 conversaciones</strong>
+            <span class="insight-meta">Selecciona una conversación para abrir el timeline.</span>
+          </article>
+        </div>
+
+        <section class="theme-panel" aria-label="Temas de interfaz">
+          <div class="theme-panel__header">
+            <div>
+              <p class="eyebrow">Apariencia</p>
+              <h3>5 temas</h3>
+            </div>
+            <select id="themeSelect" aria-label="Seleccionar tema">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="sage">Sage</option>
+              <option value="sunset">Sunset</option>
+              <option value="midnight-blue">Midnight Blue</option>
+              <option value="neon-industrial">Neon Industrial</option>
+            </select>
+          </div>
+
+          <div class="theme-swatches" id="themeSwatches">
+            <button type="button" class="theme-swatch" data-theme-value="light" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--light" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Light</span>
+            </button>
+            <button type="button" class="theme-swatch" data-theme-value="dark" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--dark" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Dark</span>
+            </button>
+            <button type="button" class="theme-swatch" data-theme-value="sage" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--sage" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Sage</span>
+            </button>
+            <button type="button" class="theme-swatch" data-theme-value="sunset" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--sunset" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Sunset</span>
+            </button>
+            <button type="button" class="theme-swatch" data-theme-value="midnight-blue" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--midnight-blue" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Midnight</span>
+            </button>
+            <button type="button" class="theme-swatch" data-theme-value="neon-industrial" aria-pressed="false">
+              <span class="theme-swatch__preview theme-swatch__preview--neon-industrial" aria-hidden="true"></span>
+              <span class="theme-swatch__label">Neon Ind.</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="sidebar-list-shell">
+          <div class="list-heading">
+            <p>Conversaciones</p>
+            <span class="list-badge">Tiempo real</span>
+          </div>
+          <div id="sidebar" class="conversation-list"></div>
+        </div>
+      </div>
+    </aside>
+
+    <main id="chat" class="chat-shell">
+      <header class="chat-header">
+        <div class="chat-header-copy">
+          <p class="eyebrow">Inbox operativo</p>
+          <h2 id="conversationTitle">Selecciona una conversación</h2>
+          <p id="conversationMeta">Las conversaciones entrantes y salientes aparecerán aquí en tiempo real.</p>
+        </div>
+
+        <div id="top-actions" class="action-bar">
+          <button type="button" class="ghost-action" data-action="checkBalance">Saldo</button>
+          <button type="button" class="ghost-action" data-action="sendQuickAnswer" data-requires-conversation="true">QuickAnswer</button>
+          <button type="button" class="ghost-action" data-action="toggleFileComposer" data-requires-conversation="true">Enviar Archivo</button>
+          <button type="button" class="ghost-action ghost-action--danger" data-action="transferConversation" data-requires-conversation="true">Transferir</button>
+        </div>
+      </header>
+
+      <section id="fileComposer" class="composer-tray" hidden>
+        <div class="composer-tray__header">
+          <div>
+            <p class="eyebrow">Adjuntos</p>
+            <h3>Enviar archivo por URL pública</h3>
+          </div>
+        </div>
+        <div class="composer-tray__grid">
+          <input id="chatFileUrl" placeholder="URL pública del archivo (https://...)" />
+          <div class="composer-tray__row">
+            <input id="chatFileName" placeholder="Nombre del archivo" />
+            <select id="chatFileExtension">
+              <option value="">Extensión</option>
+              <option value="pdf">pdf</option>
+              <option value="jpg">jpg</option>
+              <option value="jpeg">jpeg</option>
+              <option value="png">png</option>
+              <option value="doc">doc</option>
+              <option value="docx">docx</option>
+              <option value="xls">xls</option>
+              <option value="xlsx">xlsx</option>
+              <option value="csv">csv</option>
+              <option value="txt">txt</option>
+            </select>
+            <button type="button" data-action="sendFile" data-requires-conversation="true">Enviar</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="messages" class="messages-stage"></section>
+
+      <footer class="composer-footer">
+        <div class="composer-footer__meta">
+          <span id="composerHint">Selecciona una conversación para habilitar la respuesta.</span>
+        </div>
+
+        <div id="input-box" class="input-shell">
+          <input id="messageInput" placeholder="Escribe un mensaje..." />
+          <button type="button" data-action="sendMessage" data-requires-conversation="true">Enviar</button>
+        </div>
+      </footer>
+    </main>
   </div>
 
-  <!-- Modal Configuración -->
-  <div id="settingsPanel">
-    <div id="settingsCard">
-
-      <h2>Configuración Proxy</h2>
-
-      <h3>Webhook</h3>
-      <label for="channelSelect">Canales disponibles</label>
-      <select id="channelSelect">
-        <option value="">Sin cargar</option>
-      </select>
-      <div class="row-actions">
-        <button type="button" data-action="loadChannels">Recargar canales</button>
+  <div id="settingsPanel" class="settings-overlay">
+    <div id="settingsCard" class="settings-card">
+      <div class="settings-card__header">
+        <div>
+          <p class="eyebrow">Control del proxy</p>
+          <h2>Configuración avanzada</h2>
+          <p>Gestiona webhooks, canales, quick answers, archivos y consultas operativas desde un solo panel.</p>
+        </div>
+        <button id="closeSettingsBtn" type="button" class="icon-button icon-button--ghost" data-action="closeSettings">✕</button>
       </div>
-      <br><br>
-      <label for="canalId">ID Canal (manual/respaldo)</label>
-      <input id="canalId" placeholder="ID Canal" />
-      <input id="webhookUrl" placeholder="URL Webhook" />
-      <input id="secret" placeholder="Secret (opcional)" />
 
-      <div class="row-actions">
-        <button type="button" data-action="activateWebhook">Activar Proxy</button>
-        <button type="button" data-action="deactivateWebhook">Desactivar Proxy</button>
-        <button type="button" data-action="checkWebhook">Consultar Webhook</button>
-      </div>
-      <div id="webhookCheckSummary">Estado actual: no consultado
+      <div class="settings-grid">
+        <section class="settings-section settings-section--wide">
+          <div class="section-title">
+            <h3>Webhook</h3>
+            <p>Activa el proxy, consulta su estado y sincroniza canales visibles.</p>
+          </div>
+
+          <label for="channelSelect">Canales disponibles</label>
+          <select id="channelSelect">
+            <option value="">Sin cargar</option>
+          </select>
+
+          <div class="row-actions">
+            <button type="button" data-action="loadChannels">Recargar canales</button>
+          </div>
+
+          <label for="canalId">ID Canal manual</label>
+          <input id="canalId" placeholder="ID Canal" />
+
+          <label for="webhookUrl">URL del webhook</label>
+          <input id="webhookUrl" placeholder="https://mi-webhook.com/liveconnect" />
+
+          <label for="secret">Secret opcional</label>
+          <input id="secret" placeholder="Secret del webhook" />
+
+          <div class="row-actions">
+            <button type="button" data-action="activateWebhook">Activar Proxy</button>
+            <button type="button" data-action="deactivateWebhook">Desactivar Proxy</button>
+            <button type="button" data-action="checkWebhook">Consultar Webhook</button>
+          </div>
+
+          <div id="webhookCheckSummary" class="summary-card">Estado actual: no consultado
 URL configurada: no consultada
 Mensaje API: no consultado</div>
-      <div id="webhookResult">Sin resultados aún.</div>
+          <div id="webhookResult">Sin resultados aún.</div>
+        </section>
 
-      <hr class="section-divider">
+        <section class="settings-section">
+          <div class="section-title">
+            <h3>QuickAnswer</h3>
+            <p>Dispara respuestas preconfiguradas sobre la conversación activa.</p>
+          </div>
 
-      <h3>QuickAnswer</h3>
-      <label for="quickAnswerId">ID Respuesta</label>
-      <input id="quickAnswerId" placeholder="ID Respuesta" />
-      <label for="quickAnswerVariables">Variables (JSON)</label>
-      <textarea id="quickAnswerVariables" rows="4" placeholder='{"visitante.nombre":"Juan","pedido.numero":"1234"}'>{}</textarea>
-      <div class="row-actions">
-        <button type="button" data-action="sendQuickAnswer">Enviar QuickAnswer</button>
+          <label for="quickAnswerId">ID Respuesta</label>
+          <input id="quickAnswerId" placeholder="ID Respuesta" />
+
+          <label for="quickAnswerVariables">Variables (JSON)</label>
+          <textarea id="quickAnswerVariables" rows="7" placeholder='{"visitante.nombre":"Juan","pedido.numero":"1234"}'>{}</textarea>
+
+          <div class="row-actions">
+            <button type="button" data-action="sendQuickAnswer" data-requires-conversation="true">Enviar QuickAnswer</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-title">
+            <h3>Enviar Archivo</h3>
+            <p>Útil para pruebas rápidas desde el panel de control.</p>
+          </div>
+
+          <label for="fileUrl">URL Archivo</label>
+          <input id="fileUrl" placeholder="https://..." />
+
+          <label for="fileName">Nombre Archivo</label>
+          <input id="fileName" placeholder="documento" />
+
+          <label for="fileExtension">Extensión</label>
+          <select id="fileExtension">
+            <option value="">Selecciona extensión</option>
+            <option value="pdf">pdf</option>
+            <option value="jpg">jpg</option>
+            <option value="jpeg">jpeg</option>
+            <option value="png">png</option>
+            <option value="doc">doc</option>
+            <option value="docx">docx</option>
+            <option value="xls">xls</option>
+            <option value="xlsx">xlsx</option>
+            <option value="csv">csv</option>
+            <option value="txt">txt</option>
+          </select>
+
+          <div class="row-actions">
+            <button type="button" data-action="sendFile" data-requires-conversation="true">Enviar Archivo</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-title">
+            <h3>Balance</h3>
+            <p>Consulta el estado operativo del saldo del proxy.</p>
+          </div>
+
+          <div id="balanceDisplay">No consultado</div>
+
+          <div class="row-actions">
+            <button type="button" data-action="consultBalance">Consultar Saldo</button>
+          </div>
+
+          <div id="configStatus" class="status-note is-neutral">Esperando acción.</div>
+        </section>
       </div>
-
-      <hr class="section-divider">
-
-      <h3>Enviar Archivo</h3>
-      <label for="fileUrl">URL Archivo</label>
-      <input id="fileUrl" placeholder="https://..." />
-      <label for="fileName">Nombre Archivo</label>
-      <input id="fileName" placeholder="documento" />
-      <label for="fileExtension">Extension</label>
-      <select id="fileExtension">
-        <option value="">Selecciona extension</option>
-        <option value="pdf">pdf</option>
-        <option value="jpg">jpg</option>
-        <option value="jpeg">jpeg</option>
-        <option value="png">png</option>
-        <option value="doc">doc</option>
-        <option value="docx">docx</option>
-        <option value="xls">xls</option>
-        <option value="xlsx">xlsx</option>
-        <option value="csv">csv</option>
-        <option value="txt">txt</option>
-      </select>
-      <div class="row-actions">
-        <button type="button" data-action="sendFile">Enviar Archivo</button>
-      </div>
-
-      <hr class="section-divider">
-
-      <h3>Balance</h3>
-      <div id="balanceDisplay">No consultado</div>
-      <div class="row-actions">
-        <button type="button" data-action="consultBalance">Consultar Saldo</button>
-      </div>
-      <div id="configStatus">Esperando acción.</div>
-
-      <br><br>
-      <button id="closeSettingsBtn" type="button" data-action="closeSettings">Cerrar</button>
-
     </div>
   </div>
 
-  <!-- Conversaciones -->
-  <div id="sidebar"></div>
+  <div id="toastViewport" class="toast-viewport" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Chat -->
-  <div id="chat">
-    <div id="top-actions">
-      <button type="button" data-action="checkBalance">Saldo</button>
-      <button type="button" data-action="sendQuickAnswer">QuickAnswer</button>
-      <button type="button" data-action="toggleFileComposer">Enviar Archivo</button>
-      <button type="button" data-action="transferConversation">Transferir</button>
-    </div>
-
-    <div id="fileComposer" hidden style="padding: 10px 12px; border-bottom: 1px solid #dbe3ef; background: #f8fafc; display: grid; gap: 8px;">
-      <input id="chatFileUrl" placeholder="URL pública del archivo (https://...)" />
-      <div style="display: grid; grid-template-columns: 1fr 140px auto; gap: 8px;">
-        <input id="chatFileName" placeholder="Nombre archivo" />
-        <select id="chatFileExtension">
-          <option value="">Extensión</option>
-          <option value="pdf">pdf</option>
-          <option value="jpg">jpg</option>
-          <option value="jpeg">jpeg</option>
-          <option value="png">png</option>
-          <option value="doc">doc</option>
-          <option value="docx">docx</option>
-          <option value="xls">xls</option>
-          <option value="xlsx">xlsx</option>
-          <option value="csv">csv</option>
-          <option value="txt">txt</option>
-        </select>
-        <button type="button" data-action="sendFile">Enviar</button>
+  <div id="imageModal" hidden class="image-modal">
+    <div class="image-modal__card">
+      <img id="imageModalImage" alt="Previsualización de imagen" />
+      <div class="image-modal__actions">
+        <a id="imageModalOpenLink" href="#" target="_blank" rel="noopener noreferrer">Abrir en pestaña nueva</a>
+        <button id="imageModalCloseBtn" type="button" data-action="closeImageModal">Cerrar</button>
       </div>
-    </div>
-
-    <div id="messages"></div>
-
-    <div id="input-box">
-      <input id="messageInput" placeholder="Escribe un mensaje..." />
-      <button type="button" data-action="sendMessage">Enviar</button>
-    </div>
-  </div>
-
-  <div id="imageModal" hidden style="position: fixed; inset: 0; z-index: 1200; background: rgba(2, 6, 23, 0.86); display: none; align-items: center; justify-content: center; padding: 20px;">
-    <div style="max-width: min(92vw, 900px); max-height: 90vh; display: grid; gap: 10px; justify-items: center;">
-      <img id="imageModalImage" alt="Previsualizacion de imagen" style="max-width: 100%; max-height: 80vh; border-radius: 12px; border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 18px 36px rgba(0,0,0,0.45);" />
-      <a id="imageModalOpenLink" href="#" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #e2e8f0; color: #0f172a; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight: 600;">Abrir en pestaña nueva</a>
-      <button id="imageModalCloseBtn" type="button" data-action="closeImageModal" style="background: #334155; color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 600;">Cerrar</button>
     </div>
   </div>
 

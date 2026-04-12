@@ -1,30 +1,38 @@
-from flask import Flask, request, jsonify, render_template
+from queue import Empty
 
-from metodos.Webhook import procesar_webhook
-from metodos.Setwebhook import set_webhook
-from metodos.GetWebhook import get_webhook
-from metodos.Token import obtener_token
-from metodos.SendMessage import send_message
-from metodos.SendQuickAnswer import send_quick_answer
-from metodos.SendFile import send_file
-from metodos.Transfer import transfer
-from metodos.Balance import get_balance
-from metodos.Channels import get_channels
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+
+from core.message_router import MessageRouter
 from Inbox.conversations import get_conversations
 from Inbox.messages import get_messages
 from DB.database import init_db
+from services.realtime import format_sse, subscribe, unsubscribe
+
 init_db()
 
 app = Flask(__name__)
+router = MessageRouter()
 
-def _status_from_result(result):
+
+def _status_from_result(result, default_error_status=502):
     if isinstance(result, dict):
         status = result.get("status_code")
         if isinstance(status, int):
             return status
         if result.get("ok") is False:
-            return 502
+            return default_error_status
+        if result.get("status") == "error":
+            return default_error_status
     return 200
+
+
+def _payload():
+    return request.get_json(silent=True)
+
+
+def _execute(route_name, payload=None, default_error_status=502):
+    result = router.command_for(route_name).execute(payload)
+    return jsonify(result), _status_from_result(result, default_error_status=default_error_status)
 
 @app.route("/", methods=["GET"])
 def home():
@@ -35,76 +43,78 @@ def api_get_conversations():
     return jsonify(get_conversations())
 
 @app.route("/config/setWebhook", methods=["POST"])
-def config_set_webhook():
-    payload = request.get_json(silent=True) or {}
-    result = set_webhook(payload)
-    return jsonify(result), _status_from_result(result)
+@app.route("/setWebhook", methods=["POST"])
+def set_webhook_route():
+    return _execute("config.set_webhook", _payload() or {})
 
 @app.route("/config/getWebhook", methods=["POST"])
-def config_get_webhook():
-    payload = request.get_json(silent=True) or {}
-    id_canal = payload.get("id_canal")
-    if id_canal is None:
-        return jsonify({"ok": False, "error": "id_canal es requerido"}), 400
-    result = get_webhook(id_canal)
-    return jsonify(result), _status_from_result(result)
+@app.route("/getWebhook", methods=["POST"])
+def get_webhook_route():
+    return _execute("config.get_webhook", _payload() or {})
 
 @app.route("/config/balance", methods=["GET"])
-def config_balance():
-    result = get_balance()
-    return jsonify(result), _status_from_result(result)
+@app.route("/balance", methods=["GET"])
+def balance_route():
+    return _execute("config.balance")
 
 @app.route("/config/channels", methods=["GET"])
 def config_channels():
     filters = request.args.to_dict()
-    result = get_channels(filters)
-    return jsonify(result), _status_from_result(result)
+    return _execute("config.channels", filters)
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
 def api_get_messages(conversation_id):
     return jsonify(get_messages(conversation_id))
 
+
+@app.route("/events/stream", methods=["GET"])
+def events_stream():
+    subscriber_id, event_queue = subscribe()
+
+    @stream_with_context
+    def event_generator():
+        try:
+            yield "retry: 2000\n\n"
+            yield format_sse("stream.ready", {"ok": True})
+
+            while True:
+                try:
+                    event = event_queue.get(timeout=25)
+                    yield format_sse(event["type"], event.get("payload"))
+                except Empty:
+                    yield format_sse("stream.heartbeat", {"ok": True})
+        finally:
+            unsubscribe(subscriber_id)
+
+    return Response(
+        event_generator(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 @app.route("/webhook/liveconnect", methods=["POST"])
 def webhook():
-    result = procesar_webhook(request.get_json(silent=True))
-    status_code = 200 if result.get("ok", result.get("status") == "ok") else 400
-    return jsonify(result), status_code
-
-@app.route("/setWebhook", methods=["POST"])
-def api_set_webhook():
-    payload = request.get_json(silent=True) or {}
-    result = set_webhook(payload)
-    return jsonify(result), _status_from_result(result)
-
-@app.route("/getWebhook", methods=["POST"])
-def api_get_webhook():
-    payload = request.get_json(silent=True) or {}
-    id_canal = payload.get("id_canal")
-    if id_canal is None:
-        return jsonify({"ok": False, "error": "id_canal es requerido"}), 400
-    result = get_webhook(id_canal)
-    return jsonify(result), _status_from_result(result)
+    return _execute("webhook.receive", _payload(), default_error_status=400)
 
 @app.route("/sendMessage", methods=["POST"])
 def api_send_message():
-    return jsonify(send_message(request.json))
+    return _execute("message.send", _payload())
 
 @app.route("/sendQuickAnswer", methods=["POST"])
 def api_send_quick_answer():
-    return jsonify(send_quick_answer(request.json))
+    return _execute("message.send_quick_answer", _payload())
 
 @app.route("/sendFile", methods=["POST"])
 def api_send_file():
-    return jsonify(send_file(request.json))
+    return _execute("message.send_file", _payload())
 
 @app.route("/transfer", methods=["POST"])
 def api_transfer():
-    return jsonify(transfer(request.json))
-
-@app.route("/balance", methods=["GET"])
-def api_balance():
-    result = get_balance()
-    return jsonify(result), _status_from_result(result)
+    return _execute("conversation.transfer", _payload())
 
 if __name__ == "__main__":
     app.run(port=3000)

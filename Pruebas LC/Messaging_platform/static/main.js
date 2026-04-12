@@ -1,6 +1,4 @@
 const APP_CONFIG = Object.freeze({
-  conversationsPollMs: 5000,
-  messagesPollMs: 2000,
   defaultTransferChannelId: 3918,
   currencyLocale: "es-CO"
 });
@@ -30,21 +28,49 @@ const ALLOWED_FILE_EXTENSIONS = Object.freeze([
   "txt"
 ]);
 
+const THEME_STORAGE_KEY = "lc_proxy_theme";
+const THEMES = Object.freeze([
+  "light",
+  "dark",
+  "sage",
+  "sunset",
+  "midnight-blue",
+  "neon-industrial"
+]);
+
 const UI_TEXT = Object.freeze({
   invalidConversation: "Selecciona una conversacion primero.",
   invalidBalance: "No fue posible interpretar el saldo. Revisa el panel de configuracion.",
-  transferSuccess: "Conversacion transferida a LiveConnect",
-  transferError: "No se pudo transferir la conversacion."
+  transferSuccess: "Conversacion transferida a LiveConnect.",
+  transferError: "No se pudo transferir la conversacion.",
+  noConversationTitle: "Selecciona una conversación",
+  noConversationMeta: "Las conversaciones entrantes y salientes aparecerán aquí en tiempo real.",
+  noConversationHint: "Selecciona una conversación para habilitar la respuesta.",
+  emptyConversationTitle: "Aún no hay mensajes en este hilo",
+  emptyConversationBody: "Cuando el proveedor entregue mensajes, aparecerán aquí con su contexto, archivos y metadata relevante.",
+  emptyInboxTitle: "Tu bandeja está lista",
+  emptyInboxBody: "En cuanto lleguen conversaciones desde el webhook o desde pruebas manuales, las verás en esta lista."
 });
 
 const state = {
-  currentConversation: null
+  currentConversation: null,
+  currentConversationData: null,
+  conversations: [],
+  theme: "light",
+  eventSource: null,
+  eventStreamConnected: false,
+  scheduledConversationRefresh: null,
+  scheduledMessageRefresh: null
 };
 
 const dom = {
   sidebar: document.getElementById("sidebar"),
   messages: document.getElementById("messages"),
   messageInput: document.getElementById("messageInput"),
+  conversationTitle: document.getElementById("conversationTitle"),
+  conversationMeta: document.getElementById("conversationMeta"),
+  conversationCount: document.getElementById("conversationCount"),
+  composerHint: document.getElementById("composerHint"),
   settingsPanel: document.getElementById("settingsPanel"),
   channelSelect: document.getElementById("channelSelect"),
   canalId: document.getElementById("canalId"),
@@ -66,18 +92,131 @@ const dom = {
   fileName: document.getElementById("fileName"),
   fileExtension: document.getElementById("fileExtension"),
   quickAnswerId: document.getElementById("quickAnswerId"),
-  quickAnswerVariables: document.getElementById("quickAnswerVariables")
+  quickAnswerVariables: document.getElementById("quickAnswerVariables"),
+  toastViewport: document.getElementById("toastViewport"),
+  themeSelect: document.getElementById("themeSelect"),
+  themeSwatches: document.getElementById("themeSwatches"),
+  sseStatus: document.getElementById("sseStatus"),
+  refreshNowBtn: document.getElementById("refreshNowBtn")
 };
 
 function renderConfigStatus(text, isError = false) {
   if (!dom.configStatus) return;
   dom.configStatus.innerText = text;
-  dom.configStatus.className = isError ? "error" : "ok";
+  dom.configStatus.className = `status-note ${isError ? "is-error" : "is-ok"}`;
 }
 
 function writeWebhookResult(data) {
   if (!dom.webhookResult) return;
   dom.webhookResult.innerText = JSON.stringify(data, null, 2);
+}
+
+function showToast(title, message, tone = "info") {
+  if (!dom.toastViewport) return;
+
+  const toast = document.createElement("article");
+  toast.className = `toast toast--${tone}`;
+
+  const titleNode = document.createElement("p");
+  titleNode.className = "toast__title";
+  titleNode.innerText = title;
+
+  const bodyNode = document.createElement("p");
+  bodyNode.className = "toast__body";
+  bodyNode.innerText = message;
+
+  toast.appendChild(titleNode);
+  toast.appendChild(bodyNode);
+  dom.toastViewport.appendChild(toast);
+
+  window.setTimeout(() => {
+    toast.remove();
+  }, 3800);
+}
+
+function isValidTheme(theme) {
+  return THEMES.includes(theme);
+}
+
+function readStoredTheme() {
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isValidTheme(storedTheme) ? storedTheme : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function storeTheme(theme) {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch (_error) {
+    // Ignore storage errors on restricted environments.
+  }
+}
+
+function getInitialTheme() {
+  const storedTheme = readStoredTheme();
+  if (storedTheme) return storedTheme;
+
+  try {
+    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      return "dark";
+    }
+  } catch (_error) {
+    // Ignore media query failures.
+  }
+
+  return "light";
+}
+
+function syncThemeControls(theme) {
+  if (dom.themeSelect) {
+    dom.themeSelect.value = theme;
+  }
+
+  document.querySelectorAll("[data-theme-value]").forEach((button) => {
+    const isActive = button.dataset.themeValue === theme;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function applyTheme(theme, persist = true) {
+  const nextTheme = isValidTheme(theme) ? theme : "light";
+  state.theme = nextTheme;
+  document.body.dataset.theme = nextTheme;
+  syncThemeControls(nextTheme);
+
+  if (persist) {
+    storeTheme(nextTheme);
+  }
+}
+
+function scheduleConversationRefresh(delayMs = 120) {
+  if (state.scheduledConversationRefresh) {
+    window.clearTimeout(state.scheduledConversationRefresh);
+  }
+
+  state.scheduledConversationRefresh = window.setTimeout(() => {
+    state.scheduledConversationRefresh = null;
+    loadConversations();
+  }, delayMs);
+}
+
+function scheduleMessageRefresh(conversationId, delayMs = 120) {
+  if (!conversationId) return;
+
+  if (state.scheduledMessageRefresh) {
+    window.clearTimeout(state.scheduledMessageRefresh);
+  }
+
+  state.scheduledMessageRefresh = window.setTimeout(() => {
+    state.scheduledMessageRefresh = null;
+    if (state.currentConversation === conversationId) {
+      loadMessages(conversationId);
+    }
+  }, delayMs);
 }
 
 function isApiSuccess(res, data) {
@@ -269,27 +408,181 @@ function getSelectedChannelId() {
 
 function ensureCurrentConversation() {
   if (!state.currentConversation) {
-    alert(UI_TEXT.invalidConversation);
+    showToast("Conversación requerida", UI_TEXT.invalidConversation, "info");
     return null;
   }
 
   return state.currentConversation;
 }
 
+function formatDateLabel(value) {
+  if (!value) return "Sin actividad reciente";
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return "Sin actividad reciente";
+
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(parsedDate);
+}
+
+function getConversationLabel(conversation) {
+  const contactName = normalizeText(conversation?.contact_name);
+  if (contactName) return contactName;
+
+  const conversationId = normalizeText(conversation?.id);
+  return conversationId || "Conversación sin ID";
+}
+
+function getConversationMetaLine(conversation) {
+  const conversationId = normalizeText(conversation?.id);
+  const channel = normalizeText(conversation?.canal || "unknown");
+  const pieces = [];
+
+  if (conversationId) pieces.push(conversationId);
+  if (channel) pieces.push(`Canal ${channel}`);
+
+  return pieces.join(" · ");
+}
+
+function setConversationContext(conversation) {
+  state.currentConversationData = conversation || null;
+
+  if (!conversation) {
+    if (dom.conversationTitle) dom.conversationTitle.innerText = UI_TEXT.noConversationTitle;
+    if (dom.conversationMeta) dom.conversationMeta.innerText = UI_TEXT.noConversationMeta;
+    if (dom.composerHint) dom.composerHint.innerText = UI_TEXT.noConversationHint;
+    syncConversationControls();
+    return;
+  }
+
+  if (dom.conversationTitle) {
+    dom.conversationTitle.innerText = getConversationLabel(conversation);
+  }
+
+  if (dom.conversationMeta) {
+    const metaParts = [
+      getConversationMetaLine(conversation),
+      `Actualizado ${formatDateLabel(conversation.updated_at)}`
+    ].filter(Boolean);
+    dom.conversationMeta.innerText = metaParts.join(" · ");
+  }
+
+  if (dom.composerHint) {
+    dom.composerHint.innerText = `Responderás en ${getConversationLabel(conversation)}. También puedes adjuntar archivos o disparar quick answers.`;
+  }
+
+  syncConversationControls();
+}
+
+function updateConversationCount(count) {
+  if (!dom.conversationCount) return;
+  const total = Number.isFinite(count) ? count : 0;
+  dom.conversationCount.innerText = `${total} ${total === 1 ? "conversación" : "conversaciones"}`;
+}
+
+function syncConversationControls() {
+  const hasConversation = Boolean(state.currentConversation);
+  document
+    .querySelectorAll("[data-requires-conversation='true']")
+    .forEach((element) => {
+      element.disabled = !hasConversation;
+    });
+
+  if (dom.messageInput) {
+    dom.messageInput.disabled = !hasConversation;
+  }
+
+  if (dom.chatFileUrl) dom.chatFileUrl.disabled = !hasConversation;
+  if (dom.chatFileName) dom.chatFileName.disabled = !hasConversation;
+  if (dom.chatFileExtension) dom.chatFileExtension.disabled = !hasConversation;
+}
+
+function renderEmptyMessagesState(title, body) {
+  if (!dom.messages) return;
+
+  const emptyState = document.createElement("article");
+  emptyState.className = "message-empty";
+
+  const heading = document.createElement("h3");
+  heading.innerText = title;
+
+  const description = document.createElement("p");
+  description.innerText = body;
+
+  emptyState.appendChild(heading);
+  emptyState.appendChild(description);
+  dom.messages.innerHTML = "";
+  dom.messages.appendChild(emptyState);
+}
+
+function renderSidebarEmptyState(title, body) {
+  if (!dom.sidebar) return;
+
+  const emptyState = document.createElement("article");
+  emptyState.className = "message-empty";
+
+  const heading = document.createElement("h3");
+  heading.innerText = title;
+
+  const description = document.createElement("p");
+  description.innerText = body;
+
+  emptyState.appendChild(heading);
+  emptyState.appendChild(description);
+  dom.sidebar.innerHTML = "";
+  dom.sidebar.appendChild(emptyState);
+}
+
 function renderConversationList(conversations) {
   if (!dom.sidebar) return;
 
   dom.sidebar.innerHTML = "";
+
+  if (!Array.isArray(conversations) || conversations.length === 0) {
+    renderSidebarEmptyState(UI_TEXT.emptyInboxTitle, UI_TEXT.emptyInboxBody);
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
 
   conversations.forEach((conversation) => {
-    const item = document.createElement("div");
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "conversation";
     if (conversation.id === state.currentConversation) {
       item.classList.add("active");
     }
     item.dataset.conversationId = conversation.id;
-    item.innerText = conversation.id;
+
+    const header = document.createElement("div");
+    header.className = "conversation__row";
+
+    const title = document.createElement("p");
+    title.className = "conversation__title";
+    title.innerText = getConversationLabel(conversation);
+
+    const time = document.createElement("span");
+    time.className = "conversation__time";
+    time.innerText = formatDateLabel(conversation.updated_at);
+
+    header.appendChild(title);
+    header.appendChild(time);
+
+    const meta = document.createElement("p");
+    meta.className = "conversation__meta";
+    meta.innerText = getConversationMetaLine(conversation);
+
+    const badge = document.createElement("span");
+    badge.className = "conversation__badge";
+    badge.innerText = normalizeText(conversation?.canal || "Canal desconocido");
+
+    item.appendChild(header);
+    item.appendChild(meta);
+    item.appendChild(badge);
     fragment.appendChild(item);
   });
 
@@ -417,12 +710,11 @@ function appendTextWithLinks(container, text) {
     }
 
     const link = document.createElement("a");
+    link.className = "msg__link";
     link.href = rawUrl;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.innerText = rawUrl;
-    link.style.color = "#0369a1";
-    link.style.wordBreak = "break-all";
     container.appendChild(link);
 
     currentIndex = startIndex + matchedText.length;
@@ -435,27 +727,18 @@ function appendTextWithLinks(container, text) {
 
 function buildLinkPreview(url) {
   const card = document.createElement("div");
-  card.style.marginTop = "8px";
-  card.style.padding = "8px 10px";
-  card.style.border = "1px solid #cbd5e1";
-  card.style.borderRadius = "10px";
-  card.style.background = "rgba(255,255,255,0.75)";
+  card.className = "link-card";
 
   const label = document.createElement("div");
+  label.className = "link-card__label";
   label.innerText = "Enlace";
-  label.style.fontSize = "12px";
-  label.style.fontWeight = "700";
-  label.style.color = "#334155";
 
   const link = document.createElement("a");
+  link.className = "link-card__link";
   link.href = url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   link.innerText = url;
-  link.style.display = "block";
-  link.style.marginTop = "4px";
-  link.style.color = "#0369a1";
-  link.style.wordBreak = "break-all";
 
   card.appendChild(label);
   card.appendChild(link);
@@ -464,19 +747,16 @@ function buildLinkPreview(url) {
 
 function buildFilePreview({ fileUrl, fileName, fileExt }) {
   const card = document.createElement("div");
-  card.style.marginTop = "8px";
-  card.style.padding = "10px";
-  card.style.border = "1px solid #cbd5e1";
-  card.style.borderRadius = "10px";
-  card.style.background = "rgba(255,255,255,0.8)";
-  card.style.display = "grid";
-  card.style.gap = "8px";
+  card.className = "file-card";
+
+  const label = document.createElement("p");
+  label.className = "file-card__label";
+  label.innerText = "Archivo";
 
   const title = document.createElement("div");
+  title.className = "file-card__title";
   title.innerText = fileName || "Archivo compartido";
-  title.style.fontWeight = "700";
-  title.style.color = "#0f172a";
-  title.style.wordBreak = "break-word";
+  card.appendChild(label);
   card.appendChild(title);
 
   const resolvedExtension = normalizeFileExtension(fileExt || getUrlExtension(fileUrl));
@@ -484,13 +764,11 @@ function buildFilePreview({ fileUrl, fileName, fileExt }) {
 
   if (fileUrl) {
     const urlLink = document.createElement("a");
+    urlLink.className = "file-card__link";
     urlLink.href = fileUrl;
     urlLink.target = "_blank";
     urlLink.rel = "noopener noreferrer";
     urlLink.innerText = fileUrl;
-    urlLink.style.color = "#0369a1";
-    urlLink.style.wordBreak = "break-all";
-    urlLink.style.fontSize = "12px";
     if (isImage) {
       urlLink.addEventListener("click", (event) => {
         event.preventDefault();
@@ -500,35 +778,23 @@ function buildFilePreview({ fileUrl, fileName, fileExt }) {
     card.appendChild(urlLink);
 
     const actions = document.createElement("div");
-    actions.style.display = "flex";
-    actions.style.flexWrap = "wrap";
-    actions.style.gap = "8px";
+    actions.className = "file-card__actions";
 
     if (isImage) {
       const openButton = document.createElement("button");
       openButton.type = "button";
+      openButton.className = "file-card__button";
       openButton.innerText = "Abrir archivo";
-      openButton.style.background = "#dbeafe";
-      openButton.style.color = "#1e3a8a";
-      openButton.style.padding = "6px 10px";
-      openButton.style.borderRadius = "8px";
-      openButton.style.fontWeight = "600";
       openButton.addEventListener("click", () => openImageModal(fileUrl));
       actions.appendChild(openButton);
     }
 
     const downloadLink = document.createElement("a");
+    downloadLink.className = "file-card__download";
     downloadLink.href = fileUrl;
     downloadLink.target = "_blank";
     downloadLink.rel = "noopener noreferrer";
     downloadLink.innerText = "Descargar archivo";
-    downloadLink.style.display = "inline-block";
-    downloadLink.style.padding = "6px 10px";
-    downloadLink.style.borderRadius = "8px";
-    downloadLink.style.background = "#e0f2fe";
-    downloadLink.style.color = "#075985";
-    downloadLink.style.textDecoration = "none";
-    downloadLink.style.fontWeight = "600";
     actions.appendChild(downloadLink);
 
     card.appendChild(actions);
@@ -541,25 +807,12 @@ function buildMetadataPreview(metadata) {
   if (!metadata || typeof metadata !== "object") return null;
 
   const details = document.createElement("details");
-  details.style.marginTop = "8px";
-  details.style.border = "1px dashed #94a3b8";
-  details.style.borderRadius = "8px";
-  details.style.padding = "6px 8px";
-  details.style.background = "rgba(248,250,252,0.8)";
+  details.className = "metadata-card";
 
   const summary = document.createElement("summary");
   summary.innerText = "Metadata";
-  summary.style.cursor = "pointer";
-  summary.style.fontWeight = "600";
-  summary.style.color = "#334155";
 
   const pre = document.createElement("pre");
-  pre.style.margin = "8px 0 0";
-  pre.style.fontSize = "11px";
-  pre.style.whiteSpace = "pre-wrap";
-  pre.style.wordBreak = "break-word";
-  pre.style.color = "#0f172a";
-
   const metadataText = JSON.stringify(metadata, null, 2);
   pre.innerText = metadataText.length > 2000 ? `${metadataText.slice(0, 2000)}\n...` : metadataText;
 
@@ -569,6 +822,9 @@ function buildMetadataPreview(metadata) {
 }
 
 function renderMessageBubble(item, messageItem) {
+  const content = document.createElement("div");
+  content.className = "msg__content";
+
   const rawMessageText = normalizeText(messageItem?.message);
   const parsedFileMessage = parseFileMessage(rawMessageText);
 
@@ -612,28 +868,39 @@ function renderMessageBubble(item, messageItem) {
 
   if (displayText) {
     const textNode = document.createElement("div");
-    textNode.style.whiteSpace = "pre-wrap";
-    textNode.style.wordBreak = "break-word";
+    textNode.className = "msg__text";
     appendTextWithLinks(textNode, displayText);
-    item.appendChild(textNode);
+    content.appendChild(textNode);
   }
 
   if (messageType === "link") {
-    urls.slice(0, 2).forEach((url) => item.appendChild(buildLinkPreview(url)));
+    urls.slice(0, 2).forEach((url) => content.appendChild(buildLinkPreview(url)));
   }
 
   if (fileUrl) {
-    item.appendChild(buildFilePreview({ fileUrl, fileName, fileExt }));
+    content.appendChild(buildFilePreview({ fileUrl, fileName, fileExt }));
   }
 
   const metadataNode = buildMetadataPreview(metadata);
   if (metadataNode) {
-    item.appendChild(metadataNode);
+    content.appendChild(metadataNode);
   }
+
+  item.appendChild(content);
 }
 
 function renderMessageList(messages) {
   if (!dom.messages) return;
+
+  if (!state.currentConversation) {
+    renderEmptyMessagesState(UI_TEXT.noConversationTitle, UI_TEXT.noConversationMeta);
+    return;
+  }
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    renderEmptyMessagesState(UI_TEXT.emptyConversationTitle, UI_TEXT.emptyConversationBody);
+    return;
+  }
 
   dom.messages.innerHTML = "";
   const fragment = document.createDocumentFragment();
@@ -641,10 +908,22 @@ function renderMessageList(messages) {
   messages.forEach((messageItem) => {
     const item = document.createElement("div");
     item.className = `msg ${messageItem.sender === "usuario" ? "user" : "agent"}`;
-    item.style.display = "flex";
-    item.style.flexDirection = "column";
-    item.style.gap = "2px";
+
     renderMessageBubble(item, messageItem);
+
+    const meta = document.createElement("div");
+    meta.className = "msg__meta";
+
+    const tag = document.createElement("span");
+    tag.className = "msg__tag";
+    tag.innerText = messageItem.sender === "usuario" ? "Cliente" : "Agente";
+
+    const time = document.createElement("span");
+    time.innerText = formatDateLabel(messageItem.created_at);
+
+    meta.appendChild(tag);
+    meta.appendChild(time);
+    item.appendChild(meta);
     fragment.appendChild(item);
   });
 
@@ -718,6 +997,7 @@ function clearFileFormValues() {
 }
 
 function toggleFileComposer() {
+  if (!ensureCurrentConversation()) return;
   if (!dom.fileComposer) return;
   const isHidden = dom.fileComposer.hasAttribute("hidden");
   if (isHidden) {
@@ -740,12 +1020,14 @@ async function loadChannels() {
     if (!isApiSuccess(res, data)) {
       dom.channelSelect.innerHTML = '<option value="">Error cargando canales</option>';
       renderConfigStatus("No se pudieron cargar los canales.", true);
+      showToast("Canales no disponibles", "La API no devolvió canales visibles para configuración.", "error");
       return;
     }
 
     if (channels.length === 0) {
       dom.channelSelect.innerHTML = '<option value="">No hay canales disponibles</option>';
       renderConfigStatus("No hay canales visibles para configurar webhook.", true);
+      showToast("Sin canales visibles", "No encontramos canales disponibles en la cuenta actual.", "info");
       return;
     }
 
@@ -758,9 +1040,11 @@ async function loadChannels() {
     });
 
     renderConfigStatus("Canales cargados correctamente.");
+    showToast("Canales cargados", `Se cargaron ${channels.length} canales para configurar el proxy.`, "success");
   } catch (error) {
     dom.channelSelect.innerHTML = '<option value="">Error de red</option>';
     renderConfigStatus(`Error de red al cargar canales: ${error.message}`, true);
+    showToast("Error de red", `No se pudieron cargar canales: ${error.message}`, "error");
   }
 }
 
@@ -770,20 +1054,40 @@ async function loadConversations() {
   try {
     const { data } = await requestJSON("/conversations");
     const conversations = Array.isArray(data) ? data : [];
+    state.conversations = conversations;
+    updateConversationCount(conversations.length);
+
+    if (state.currentConversation) {
+      const refreshedConversation = conversations.find(
+        (conversation) => conversation.id === state.currentConversation
+      );
+      if (refreshedConversation) {
+        setConversationContext(refreshedConversation);
+      } else {
+        state.currentConversation = null;
+        setConversationContext(null);
+      }
+    } else {
+      setConversationContext(null);
+    }
+
     renderConversationList(conversations);
   } catch (_error) {
-    dom.sidebar.innerHTML = '<div class="conversation">Error cargando conversaciones</div>';
+    updateConversationCount(0);
+    renderSidebarEmptyState("No se pudo cargar la bandeja", "Revisa la conexión con el backend y vuelve a intentarlo.");
   }
 }
 
 async function selectConversation(conversationId, element) {
   state.currentConversation = conversationId;
+  const selectedConversation = state.conversations.find((conversation) => conversation.id === conversationId) || null;
 
   document.querySelectorAll(".conversation").forEach((item) => item.classList.remove("active"));
   if (element) {
     element.classList.add("active");
   }
 
+  setConversationContext(selectedConversation);
   await loadMessages(conversationId);
 }
 
@@ -802,12 +1106,13 @@ async function loadMessages(conversationId) {
       file_url: normalizeText(messageItem?.file_url),
       file_name: normalizeText(messageItem?.file_name),
       file_ext: normalizeFileExtension(messageItem?.file_ext || ""),
-      metadata: normalizeMetadata(messageItem?.metadata)
+      metadata: normalizeMetadata(messageItem?.metadata),
+      created_at: normalizeText(messageItem?.created_at)
     }));
 
     renderMessageList(normalizedMessages);
   } catch (_error) {
-    dom.messages.innerHTML = "";
+    renderEmptyMessagesState("No pudimos cargar el historial", "Intenta nuevamente en unos segundos.");
   }
 }
 
@@ -827,12 +1132,14 @@ async function sendMessage() {
   if (!isApiSuccess(res, data)) {
     renderConfigStatus("No se pudo enviar el mensaje.", true);
     writeWebhookResult(data);
+    showToast("Error al enviar", "No se pudo enviar el mensaje a la conversación activa.", "error");
     return;
   }
 
   dom.messageInput.value = "";
   renderConfigStatus("Mensaje enviado correctamente.");
   writeWebhookResult(data);
+  showToast("Mensaje enviado", "La respuesta se registró correctamente en la conversación.", "success");
   await loadMessages(conversationId);
 }
 
@@ -870,11 +1177,13 @@ async function sendQuickAnswer() {
   if (!isApiSuccess(res, data)) {
     renderConfigStatus("No se pudo enviar el QuickAnswer.", true);
     writeWebhookResult(data);
+    showToast("QuickAnswer fallido", "No se pudo enviar la respuesta rápida seleccionada.", "error");
     return;
   }
 
   renderConfigStatus("QuickAnswer enviado correctamente.");
   writeWebhookResult(data);
+  showToast("QuickAnswer enviado", "La plantilla se envió correctamente al contacto.", "success");
   await loadMessages(conversationId);
 }
 
@@ -912,6 +1221,7 @@ async function sendFile() {
   if (!isApiSuccess(res, data)) {
     renderConfigStatus("No se pudo enviar el archivo.", true);
     writeWebhookResult(data);
+    showToast("Archivo no enviado", "No se pudo entregar el archivo a la conversación activa.", "error");
     return;
   }
 
@@ -919,6 +1229,7 @@ async function sendFile() {
   if (dom.fileComposer) dom.fileComposer.setAttribute("hidden", "hidden");
   renderConfigStatus("Archivo enviado correctamente.");
   writeWebhookResult(data);
+  showToast("Archivo enviado", "El archivo se entregó correctamente y quedó visible en el timeline.", "success");
   await loadMessages(conversationId);
 }
 
@@ -934,11 +1245,11 @@ async function transferConversation() {
   });
 
   if (!isApiSuccess(res, data)) {
-    alert(UI_TEXT.transferError);
+    showToast("Transferencia fallida", UI_TEXT.transferError, "error");
     return;
   }
 
-  alert(UI_TEXT.transferSuccess);
+  showToast("Transferencia completada", UI_TEXT.transferSuccess, "success");
 }
 
 async function checkBalance() {
@@ -946,11 +1257,15 @@ async function checkBalance() {
   const balance = getBalanceValue(data);
 
   if (balance === null) {
-    alert(UI_TEXT.invalidBalance);
+    showToast("Balance no disponible", UI_TEXT.invalidBalance, "error");
     return;
   }
 
-  alert(`Saldo disponible: $${balance}`);
+  showToast(
+    "Balance disponible",
+    `Saldo estimado: $${balance.toLocaleString(APP_CONFIG.currencyLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    "info"
+  );
 }
 
 function getWebhookFormValues() {
@@ -974,6 +1289,7 @@ async function submitWebhookState(estado) {
 
   if (!idCanal) {
     renderConfigStatus("Debes ingresar un ID de canal valido.", true);
+    showToast("Canal requerido", "Selecciona un canal antes de consultar el webhook.", "info");
     return;
   }
 
@@ -996,8 +1312,16 @@ async function submitWebhookState(estado) {
     );
 
     writeWebhookResult(data);
+    showToast(
+      ok ? (estado ? "Proxy activado" : "Proxy desactivado") : "Operación rechazada",
+      ok
+        ? (estado ? "El webhook quedó configurado para recibir tráfico." : "El webhook quedó desactivado correctamente.")
+        : (estado ? "La API no permitió activar el proxy." : "La API no permitió desactivar el proxy."),
+      ok ? "success" : "error"
+    );
   } catch (error) {
     renderConfigStatus(`Error de red: ${error.message}`, true);
+    showToast("Error de red", `No se pudo actualizar el webhook: ${error.message}`, "error");
   }
 }
 
@@ -1029,6 +1353,11 @@ async function checkWebhook() {
 
     renderWebhookCheckSummary(summary);
     writeWebhookResult(data);
+    showToast(
+      ok ? "Webhook consultado" : "Consulta con advertencias",
+      ok ? `Estado actual: ${summary.estado}.` : "La API devolvió un error al consultar el webhook.",
+      ok ? "success" : "error"
+    );
   } catch (error) {
     renderWebhookCheckSummary({
       estado: "error",
@@ -1036,6 +1365,7 @@ async function checkWebhook() {
       mensaje: `Error de red: ${error.message}`
     });
     renderConfigStatus(`Error de red: ${error.message}`, true);
+    showToast("Error de red", `No se pudo consultar el webhook: ${error.message}`, "error");
   }
 }
 
@@ -1059,21 +1389,119 @@ async function consultBalance() {
       ok ? "Balance consultado correctamente." : "Balance consultado con advertencias.",
       !ok
     );
+    showToast(
+      ok ? "Balance actualizado" : "Balance con advertencias",
+      `Saldo actual: $${balance.toLocaleString(APP_CONFIG.currencyLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      ok ? "success" : "info"
+    );
   } catch (error) {
     dom.balanceDisplay.innerText = "Error de red consultando balance.";
     renderConfigStatus(`Error de red: ${error.message}`, true);
+    showToast("Error de red", `No se pudo consultar el balance: ${error.message}`, "error");
   }
 }
 
 function openSettings() {
   if (!dom.settingsPanel) return;
   dom.settingsPanel.style.display = "block";
+  dom.settingsPanel.setAttribute("aria-hidden", "false");
   loadChannels();
 }
 
 function closeSettings() {
   if (!dom.settingsPanel) return;
   dom.settingsPanel.style.display = "none";
+  dom.settingsPanel.setAttribute("aria-hidden", "true");
+}
+
+function handleRealtimeMessage(payload) {
+  const conversationId = normalizeText(payload?.conversation_id);
+  scheduleConversationRefresh(80);
+
+  if (conversationId && conversationId === state.currentConversation) {
+    scheduleMessageRefresh(conversationId, 80);
+  }
+}
+
+function updateSSEIndicator() {
+  if (!dom.sseStatus) return;
+  
+  if (state.eventStreamConnected) {
+    dom.sseStatus.innerHTML = "🟢 Conectado";
+    dom.sseStatus.style.color = "var(--brand)";
+  } else {
+    dom.sseStatus.innerHTML = "🔴 Sin conexión";
+    dom.sseStatus.style.color = "var(--danger)";
+  }
+}
+
+function connectEventStream() {
+  if (typeof window.EventSource !== "function") {
+    showToast(
+      "Sin SSE",
+      "Este navegador no soporta EventSource. Usa el botón 'Actualizar' para refrescar manualmente.",
+      "info"
+    );
+    updateSSEIndicator();
+    return;
+  }
+
+  if (state.eventSource) {
+    state.eventSource.close();
+  }
+
+  const eventSource = new window.EventSource("/events/stream");
+  state.eventSource = eventSource;
+
+  eventSource.addEventListener("stream.ready", () => {
+    state.eventStreamConnected = true;
+    updateSSEIndicator();
+    console.log("✅ SSE conectado");
+  });
+
+  eventSource.addEventListener("stream.heartbeat", () => {
+    state.eventStreamConnected = true;
+    updateSSEIndicator();
+  });
+
+  eventSource.addEventListener("message.updated", (event) => {
+    state.eventStreamConnected = true;
+    updateSSEIndicator();
+
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      console.log("📨 Evento recibido:", event.type, payload);
+      handleRealtimeMessage(payload);
+    } catch (_error) {
+      console.error("Error procesando evento:", _error);
+      scheduleConversationRefresh(80);
+    }
+  });
+
+  eventSource.onerror = () => {
+    const wasConnected = state.eventStreamConnected;
+    state.eventStreamConnected = false;
+    updateSSEIndicator();
+
+    if (wasConnected) {
+      console.warn("⚠️ SSE desconectado, reconectando...");
+      showToast(
+        "Conexión perdida",
+        "Reconectando... o usa 'Actualizar' para refrescar manualmente.",
+        "info"
+      );
+    }
+    
+    window.setTimeout(() => connectEventStream(), 3000);
+  };
+}
+
+function refreshNow() {
+  loadConversations();
+  if (state.currentConversation) {
+    loadMessages(state.currentConversation);
+  }
+  showToast("Actualizando", "Datos refrescados manualmente.", "info");
 }
 
 const actionHandlers = Object.freeze({
@@ -1090,7 +1518,8 @@ const actionHandlers = Object.freeze({
   sendQuickAnswer,
   sendFile,
   transferConversation,
-  sendMessage
+  sendMessage,
+  refreshNow
 });
 
 function onActionClick(event) {
@@ -1142,12 +1571,26 @@ function onImageModalClick(event) {
 function onDocumentKeyDown(event) {
   if (event.key === "Escape") {
     closeImageModal();
+    closeSettings();
   }
 }
 
 function bindEvents() {
   document.addEventListener("click", onActionClick);
   document.addEventListener("keydown", onDocumentKeyDown);
+  
+  if (dom.refreshNowBtn) {
+    dom.refreshNowBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      refreshNow();
+    });
+  }
+  
+  window.addEventListener("beforeunload", () => {
+    if (state.eventSource) {
+      state.eventSource.close();
+    }
+  });
 
   if (dom.sidebar) {
     dom.sidebar.addEventListener("click", onConversationClick);
@@ -1176,14 +1619,13 @@ function bindEvents() {
 
 function initApp() {
   closeImageModal();
+  closeSettings();
+  setConversationContext(null);
+  renderEmptyMessagesState(UI_TEXT.noConversationTitle, UI_TEXT.noConversationMeta);
+  syncConversationControls();
   bindEvents();
   loadConversations();
-  setInterval(loadConversations, APP_CONFIG.conversationsPollMs);
-  setInterval(() => {
-    if (state.currentConversation) {
-      loadMessages(state.currentConversation);
-    }
-  }, APP_CONFIG.messagesPollMs);
+  connectEventStream();
 }
 
 initApp();

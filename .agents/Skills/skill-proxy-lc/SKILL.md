@@ -1,116 +1,58 @@
 ---
 name: skill-proxy-lc
-description: |
-  - Capa intermedia que permite interceptar, procesar y gestionar mensajes entrantes y salientes en múltiples canales (WhatsApp, Web, Instagram, etc.).
-  - Utiliza un webhook personalizado para habilitar automatización.
-  - Permite integración con sistemas externos.
-  - Ofrece control total del flujo conversacional.
-version: 1.0.0  
+description: Surface AI minima para el proxy LiveConnect. Usa Agents.md como indice y carga solo el skill o agente requerido.
+version: 1.1.0
 ---
 
-## ⚡ Capacidades
+## Cuando usar
 
-El sistema basado en el Proxy de LiveConnect permite:
+- Webhooks entrantes de LiveConnect.
+- Envio de mensajes, archivos y quick answers.
+- Configuracion de webhook, balance y canales.
+- Consultas sobre la arquitectura AI-first del proxy.
 
-- Interceptar mensajes antes de llegar a la plataforma principal  
-- Procesar mensajes en tiempo real mediante webhooks  
-- Enviar mensajes de texto, archivos y respuestas rápidas  
-- Transferir conversaciones a agentes humanos  
-- Gestionar configuración de webhooks por canal  
-- Consultar estado operativo del proxy  
-- Integrarse con sistemas externos (CRM, IA, APIs)  
-- Construir interfaces personalizadas tipo inbox  
+## Skills disponibles
 
----
+- `parse-payload`
+- `validate-message`
+- `store-message`
+- `send-message`
+- `send-file`
+- `send-quick-answer`
+- `transfer`
+- `set-webhook`
+- `get-webhook`
+- `get-balance`
+- `get-channels`
 
-## 🧠 Habilidades
+## Contratos minimos
 
-### 📩 Gestión de Mensajes
-
-- **Enviar mensajes de texto**
-  - Endpoint: `/proxy/sendMessage`
-  - Parámetros: `id_conversacion`, `mensaje`
-
-- **Enviar archivos**
-  - Endpoint: `/proxy/sendFile`
-  - Parámetros:
-    - `id_conversacion`
-    - `url`
-    - `nombre`
-    - `extension`
-
-- **Enviar respuestas rápidas (QuickAnswer)**
-  - Endpoint: `/proxy/sendQuickAnswer`
-  - Parámetros:
-    - `id_conversacion`
-    - `id_respuesta`
-    - `variables`
-
----
-
-### 🔁 Gestión de Conversaciones
-
-- **Transferir conversación a LiveConnect**
-  - Endpoint: `/proxy/transfer`
-  - Permite:
-    - Asignar agente
-    - Asignar grupo
-    - Inyectar contexto inicial  
-
----
-
-### 🔗 Configuración del Proxy
-
-- **Configurar webhook**
-  - Endpoint: `/proxy/setWebhook`
-  - Parámetros:
-    - `id_canal`
-    - `estado`
-    - `url`
-    - `secret`
-
-- **Consultar estado del webhook**
-  - Endpoint: `/proxy/getWebhook`
-
----
-
-### 📊 Monitoreo
-
-- **Consultar balance**
-  - Endpoint: `/proxy/balance`
-
----
-
-### 🧾 Procesamiento de Webhook
-
-Ejemplo de payload:
-
+- Webhook normalizado:
 ```json
 {
-  "id_conversacion": "string",
-  "message": {
-    "texto": "string",
-    "file": {
-      "url": "string",
-      "nombre": "string",
-      "extension": "string"
-    }
-  },
-  "contact_data": {
-    "name": "string"
-  }
+  "conversation_id": "string",
+  "canal": "string",
+  "message_text": "string",
+  "message_type": "text|file|link|structured",
+  "file": {"url": "string", "name": "string", "ext": "string"} | null,
+  "contact_name": "string | null",
+  "metadata": {}
 }
 ```
-# Skills Index
 
-## Proxy LiveConnect
-- sendMessage
-- sendFile
-- transfer
-- getWebhook
-- setWebhook
-- balance
+- Resultado proveedor:
+```json
+{
+  "ok": true,
+  "status_code": 200,
+  "error": "string | optional",
+  "warnings": ["string"],
+  "data": {}
+}
+```
 
-Use this skill when interacting with LiveConnect API.
+## Referencias
 
-(see /core/skills-engine)
+- `/Agents.md`
+- `/.agents/docs/Architecture.md`
+- `/.agents/docs/SkillsIndex.md`
