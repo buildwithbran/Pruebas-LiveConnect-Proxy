@@ -1,6 +1,10 @@
 ---
-name: skill-proxy-lc  
-description: Capa intermedia que permite interceptar, procesar y gestionar mensajes entrantes y salientes en múltiples canales (WhatsApp, Web, Instagram, etc.) mediante un webhook personalizado, habilitando automatización, integración con sistemas externos y control total del flujo conversacional.  
+name: skill-proxy-lc
+description: |
+  - Capa intermedia que permite interceptar, procesar y gestionar mensajes entrantes y salientes en múltiples canales (WhatsApp, Web, Instagram, etc.).
+  - Utiliza un webhook personalizado para habilitar automatización.
+  - Permite integración con sistemas externos.
+  - Ofrece control total del flujo conversacional.
 version: 1.0.0  
 ---
 
@@ -96,3 +100,17 @@ Ejemplo de payload:
     "name": "string"
   }
 }
+```
+# Skills Index
+
+## Proxy LiveConnect
+- sendMessage
+- sendFile
+- transfer
+- getWebhook
+- setWebhook
+- balance
+
+Use this skill when interacting with LiveConnect API.
+
+(see /core/skills-engine)
