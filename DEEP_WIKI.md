@@ -1,7 +1,7 @@
 # Deep Wiki — Pruebas‑LiveConnect‑Proxy
 
 ## Resumen ejecutivo
-Repositorio de pruebas internas para métodos API de LiveConnect. Implementa un backend Flask que sirve una interfaz web tipo “Inbox” y actúa como proxy hacia la API `https://api.liveconnect.chat`, además de recibir webhooks y persistir conversaciones/mensajes en SQLite. Está diseñado para uso interno (maneja credenciales sensibles).
+Repositorio de pruebas internas para métodos API de LiveConnect. Implementa un backend Flask que sirve una interfaz web tipo "Inbox" y actúa como proxy hacia la API `https://api.liveconnect.chat`, además de recibir webhooks y persistir conversaciones/mensajes en SQLite. Está diseñado para uso interno (maneja credenciales sensibles). La arquitectura se basa en un sistema de **Agentes + Skills** coordinados por `MessageRouter`, con sincronización evento-dirigida pura via SSE.
 
 ## Actualizacion de calidad y diseno (19 de febrero de 2026)
 Se aplico una mejora incremental en backend y frontend siguiendo principios SOLID/clean code, sin cambiar contratos publicos principales de la app.
@@ -23,6 +23,30 @@ Se aplico una mejora incremental en backend y frontend siguiendo principios SOLI
 ### Testing y calidad
 - Se agregaron tests unitarios deterministas en `Pruebas LC/Messaging_platform/tests/`.
 - Ejecucion: `python3 -m unittest discover -s tests -v` (actualmente en verde).
+
+## Arquitectura de Agentes (Actualización 14 de abril de 2026)
+El proyecto ha evolucionado a una arquitectura basada en **Agentes + Skills**, coordinados por `MessageRouter`. Esto reemplaza la estructura directa de Flask por un sistema modular y extensible.
+
+### Agentes Principales
+
+- **MessageRouter**: Clasifica operaciones HTTP y delega al agente correcto. Mantiene un diccionario de rutas con 9 operaciones soportadas.
+- **WebhookProcessor**: Procesa webhooks entrantes con pipeline `parse_payload` → `validate_message` → `store_message`. Publica eventos SSE tras persistir.
+- **OutboundMessageAgent**: Centraliza operaciones salientes: `sendMessage`, `sendFile`, `sendQuickAnswer`, `transfer`.
+- **ConfigurationAgent**: Maneja configuración: `setWebhook`, `getWebhook`, `getBalance`, `getChannels`.
+
+### Skills
+
+- **Webhook Skills** (`services/webhook/`): `parse-payload`, `validate-message`, `store-message`.
+- **LiveConnect Skills** (`services/liveconnect/`): `send-message`, `send-file`, `send-quick-answer`, `transfer`, `set-webhook`, `get-webhook`, `get-balance`, `get-channels`.
+- **Infraestructura**: Token provider, response normalizer, realtime pub/sub.
+
+### Mapa de Capacidades Actualizado
+
+- `POST /webhook/liveconnect` → `MessageRouter` → `WebhookProcessor` → Webhook Skills → `store-message` (publica SSE)
+- `POST /sendMessage|/sendFile|/sendQuickAnswer|/transfer` → `MessageRouter` → `OutboundMessageAgent` → LiveConnect Skills
+- `POST /setWebhook|/getWebhook`, `GET /balance`, `GET /config/channels` → `MessageRouter` → `ConfigurationAgent` → LiveConnect Skills
+- `GET /conversations`, `GET /messages/<conversation_id>` permanecen como lecturas directas de Inbox/Repository.
+- `GET /events/stream` → Realtime Service (SSE pub/sub)
 
 ## Mejoras de UI/UX y Sincronización Evento-Dirigida (12 de abril de 2026)
 
@@ -105,80 +129,114 @@ Se optimizó la sincronización para eliminar polling automático fallback y pro
 - `Pruebas LC/Messaging_platform/templates/index.html`: Nuevo panel SSE + botón Actualizar
 - `Pruebas LC/Messaging_platform/static/main.js`: `updateSSEIndicator()`, `connectEventStream()` mejorado, `refreshNow()`, binding de eventos
 
+## Arquitectura de Agentes (Actualización 14 de abril de 2026)
+
+El proyecto ha evolucionado a una arquitectura basada en **Agentes + Skills**, coordinados por `MessageRouter`. Esto reemplaza la estructura directa de Flask por un sistema modular y extensible.
+
+### Agentes Principales
+
+- **MessageRouter**: Clasifica operaciones HTTP y delega al agente correcto. Mantiene un diccionario de rutas con 9 operaciones soportadas.
+- **WebhookProcessor**: Procesa webhooks entrantes con pipeline `parse_payload` → `validate_message` → `store_message`. Publica eventos SSE tras persistir.
+- **OutboundMessageAgent**: Centraliza operaciones salientes: `sendMessage`, `sendFile`, `sendQuickAnswer`, `transfer`.
+- **ConfigurationAgent**: Maneja configuración: `setWebhook`, `getWebhook`, `getBalance`, `getChannels`.
+
+### Skills
+
+- **Webhook Skills** (`services/webhook/`): `parse-payload`, `validate-message`, `store-message`.
+- **LiveConnect Skills** (`services/liveconnect/`): `send-message`, `send-file`, `send-quick-answer`, `transfer`, `set-webhook`, `get-webhook`, `get-balance`, `get-channels`.
+- **Infraestructura**: Token provider, response normalizer, realtime pub/sub.
+
+### Mapa de Capacidades Actualizado
+
+- `POST /webhook/liveconnect` → `MessageRouter` → `WebhookProcessor` → Webhook Skills → `store-message` (publica SSE)
+- `POST /sendMessage|/sendFile|/sendQuickAnswer|/transfer` → `MessageRouter` → `OutboundMessageAgent` → LiveConnect Skills
+- `POST /setWebhook|/getWebhook`, `GET /balance`, `GET /config/channels` → `MessageRouter` → `ConfigurationAgent` → LiveConnect Skills
+- `GET /conversations`, `GET /messages/<conversation_id>` permanecen como lecturas directas de Inbox/Repository.
+- `GET /events/stream` → Realtime Service (SSE pub/sub)
+
 ## Estructura del repositorio
 - `README.md`
   Descripción general y advertencia de uso interno.
+- `Agents.md`
+  Documentación de agentes y skills.
 - `Pruebas LC/Messaging_platform/App.py`
-  Servidor Flask y rutas HTTP.
-- `Pruebas LC/Messaging_platform/metodos/`
-  Wrappers para endpoints LiveConnect (token, envío de mensajes, webhooks, balance, transferencias).
+  Servidor Flask y rutas HTTP, coordina agentes.
+- `Pruebas LC/Messaging_platform/core/`
+  Agentes principales: `message_router.py`, `webhook_processor.py`, `outbound_message_agent.py`, `configuration_agent.py`, `contracts.py`.
+- `Pruebas LC/Messaging_platform/services/`
+  Skills especializados: `webhook/` (parse, validate, store), `liveconnect/` (send_message, etc.), `realtime.py` (SSE pub/sub).
 - `Pruebas LC/Messaging_platform/Inbox/`
-  Lectura de conversaciones/mensajes desde SQLite.
+  Lectura directa de conversaciones/mensajes desde SQLite.
 - `Pruebas LC/Messaging_platform/DB/database.py`
   Repositorio SQLite (`SQLiteRepository`) e inicialización de esquema.
 - `Pruebas LC/Messaging_platform/templates/index.html`
-  UI principal (Inbox web).
+  UI principal (Inbox web) con tema neon industrial.
 - `Pruebas LC/Messaging_platform/static/main.js`
-  Lógica frontend con delegación de eventos y utilidades API.
-- `Pruebas LC/Messaging_platform/services/webhook_service.py`
-  Capa de servicio para validación/persistencia de webhook.
+  Lógica frontend con delegación de eventos y SSE.
+- `Pruebas LC/Messaging_platform/static/main.css`
+  Estilos con temas y animaciones neon.
 - `Pruebas LC/Messaging_platform/tests/`
-  Tests unitarios de repositorio y servicio de webhook.
+  Tests unitarios para agentes, skills y servicios.
 - `Pruebas LC/Messaging_platform/database.db`
   Base SQLite con `conversations` y `messages`.
+- `skills-lock.json`
+  Configuración de skills disponibles.
 
 ## Arquitectura y flujo de datos
 
 ```mermaid
 flowchart LR
-  UI["Inbox Web (index.html + main.js)"] -->|HTTP| Flask["Flask App (App.py)"]
-  Flask -->|Proxy| LC["LiveConnect API"]
-  LC -->|Webhook POST| Flask
-  Flask --> Service["Webhook Service"]
-  Service --> Repo["SQLiteRepository"]
-  Repo --> SQLite["SQLite database.db"]
-  Flask --> UI
+  UI["Inbox Web (index.html + main.js)"] -->|HTTP| MR["MessageRouter"]
+  MR --> WP["WebhookProcessor"]
+  MR --> OMA["OutboundMessageAgent"]
+  MR --> CA["ConfigurationAgent"]
+  WP -->|parse_payload, validate_message, store_message| Repo["SQLiteRepository"]
+  OMA -->|send_message, send_file, send_quick_answer, transfer| LC["LiveConnect API"]
+  CA -->|set_webhook, get_webhook, get_balance, get_channels| LC
+  LC -->|Webhook POST| WP
+  Repo -->|publish SSE| RT["Realtime Service"]
+  RT --> UI
+  Repo --> UI
 ```
 
 ### Flujos principales
-1. Inbox UI consulta `/conversations` y `/messages/<id>` para renderizar.
-2. Acciones del usuario (sendMessage, sendQuickAnswer, transfer, balance) llaman al backend Flask, que a su vez proxy hacia LiveConnect usando `PageGearToken`.
-3. Webhooks entran por `/webhook/liveconnect`, pasan por una capa de servicio y se persisten en SQLite mediante repositorio.
+1. Inbox UI consulta `/conversations` y `/messages/<id>` para renderizar (lecturas directas).
+2. Acciones del usuario (sendMessage, sendQuickAnswer, transfer, balance) pasan por `MessageRouter` a `OutboundMessageAgent` o `ConfigurationAgent`, que delegan a skills de LiveConnect.
+3. Webhooks entran por `/webhook/liveconnect`, pasan por `MessageRouter` a `WebhookProcessor`, que ejecuta skills de webhook y persiste en SQLite, publicando eventos SSE para actualización en tiempo real.
+4. SSE stream en `/events/stream` permite sincronización evento-dirigida pura.
 
 ## Backend (Flask)
 Archivo: `Pruebas LC/Messaging_platform/App.py`
+
+El backend coordina agentes a través de `MessageRouter` para procesar operaciones HTTP.
 
 ### Rutas
 - `GET /`
   Render de `index.html`.
 - `GET /conversations`
-  Lista conversaciones desde SQLite.
+  Lista conversaciones desde SQLite (lectura directa).
 - `GET /messages/<conversation_id>`
-  Lista mensajes de conversación.
+  Lista mensajes de conversación (lectura directa).
+- `GET /events/stream`
+  Stream SSE para sincronización evento-dirigida.
 - `POST /webhook/liveconnect`
-  Valida payload e inserta conversación/mensaje en SQLite.
-- `POST /config/setWebhook`
-  Proxy a LiveConnect: set webhook (ruta recomendada de UI).
-- `POST /config/getWebhook`
-  Proxy a LiveConnect: get webhook (ruta recomendada de UI).
-- `GET /config/balance`
-  Proxy a LiveConnect: consulta de balance para panel de configuración.
-- `GET /config/channels`
-  Proxy a LiveConnect: listado de canales para selector.
-- `POST /setWebhook`
-  Proxy a LiveConnect: set webhook.
-- `POST /getWebhook`
-  Proxy a LiveConnect: get webhook.
+  Delega a `WebhookProcessor` para procesar y persistir webhooks.
 - `POST /sendMessage`
-  Proxy a LiveConnect.
-- `POST /sendQuickAnswer`
-  Proxy a LiveConnect.
+  Delega a `OutboundMessageAgent` para enviar mensaje.
 - `POST /sendFile`
-  Proxy a LiveConnect.
+  Delega a `OutboundMessageAgent` para enviar archivo.
+- `POST /sendQuickAnswer`
+  Delega a `OutboundMessageAgent` para enviar quick answer.
 - `POST /transfer`
-  Proxy a LiveConnect.
-- `GET /balance`
-  Proxy a LiveConnect.
+  Delega a `OutboundMessageAgent` para transferir conversación.
+- `POST /setWebhook`, `/config/setWebhook`
+  Delega a `ConfigurationAgent` para configurar webhook.
+- `POST /getWebhook`, `/config/getWebhook`
+  Delega a `ConfigurationAgent` para consultar webhook.
+- `GET /balance`, `/config/balance`
+  Delega a `ConfigurationAgent` para obtener balance.
+- `GET /config/channels`
+  Delega a `ConfigurationAgent` para listar canales.
 
 ### Puntos clave
 - `init_db()` se ejecuta al importar el módulo, creando tablas si no existen.
@@ -268,14 +326,12 @@ Archivos:
 Directorio: `Pruebas LC/Messaging_platform/tests/`
 
 ### Suite actual
-- `test_repository.py`
-  - actualiza conversación existente en `save_message`
-  - preserva orden de mensajes
-  - guarda/recupera balance cacheado
-- `test_webhook_service.py`
-  - persiste conversación y mensaje con payload válido
-  - falla con `id_conversacion` ausente
-  - falla con payload inválido
+- `test_webhook_pipeline.py` - Flujo completo webhook (parse, validate, store)
+- `test_repository.py` - Normalización y persistencia SQLite
+- `test_liveconnect_services.py` - Mocks de servicios LiveConnect
+- `test_realtime_service.py` - SSE y pub/sub
+- `test_webhook_service.py` - Validación y servicio webhook
+- `test_route_aliases.py` - Alias de rutas HTTP
 
 ### Ejecución
 Desde `Pruebas LC/Messaging_platform/`:
@@ -624,3 +680,10 @@ Paso a paso:
 5. El frontend consulta mensajes por API interna.
 6. Se renderiza texto/archivo/link/metadata.
 7. Las acciones del agente (`sendMessage`, `sendFile`, `sendQuickAnswer`) se proxyan y se persisten para vista inmediata.
+
+## Referencias
+- `Agents.md` - Documentación de agentes y skills.
+- `/.agents/docs/Architecture.md` - Arquitectura general.
+- `/.agents/docs/SkillsIndex.md` - Índice de skills.
+- `/.agents/Skills/skill-proxy-lc/SKILL.md` - Skill específico del proxy LiveConnect.
+- `Pruebas LC/Messaging_platform/tests/` - Suite de tests unitarios.

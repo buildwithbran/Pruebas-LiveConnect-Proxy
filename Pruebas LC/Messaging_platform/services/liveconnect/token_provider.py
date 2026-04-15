@@ -41,8 +41,8 @@ def get_token():
     except ValueError as error:
         raise TokenProviderError("Respuesta invalida solicitando token") from error
 
-    if not response.ok:
-        raise TokenProviderError(f"Error solicitando token: {payload}")
+    if payload.get("status") != 1:
+        raise TokenProviderError(f"Error solicitando token: {payload.get('status_message', 'Error desconocido')}")
 
     token = str(payload.get("PageGearToken") or "").strip()
     if not token:
