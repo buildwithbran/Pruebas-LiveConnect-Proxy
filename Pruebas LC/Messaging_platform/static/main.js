@@ -64,7 +64,10 @@ const state = {
 };
 
 const dom = {
-  sidebar: document.getElementById("sidebar"),
+  appFrame: document.getElementById("app"),
+  sidebarShell: document.getElementById("sidebarShell"),
+  sidebarToggle: document.getElementById("sidebarToggle"),
+  conversationList: document.getElementById("conversationList"),
   messages: document.getElementById("messages"),
   messageInput: document.getElementById("messageInput"),
   conversationTitle: document.getElementById("conversationTitle"),
@@ -85,6 +88,8 @@ const dom = {
   imageModalImage: document.getElementById("imageModalImage"),
   imageModalOpenLink: document.getElementById("imageModalOpenLink"),
   imageModalCloseBtn: document.getElementById("imageModalCloseBtn"),
+  quickAnswerModal: document.getElementById("quickAnswerModal"),
+  quickAnswerCloseBtn: document.getElementById("quickAnswerCloseBtn"),
   chatFileUrl: document.getElementById("chatFileUrl"),
   chatFileName: document.getElementById("chatFileName"),
   chatFileExtension: document.getElementById("chatFileExtension"),
@@ -93,6 +98,13 @@ const dom = {
   fileExtension: document.getElementById("fileExtension"),
   quickAnswerId: document.getElementById("quickAnswerId"),
   quickAnswerVariables: document.getElementById("quickAnswerVariables"),
+  quickAnswerStatus: document.getElementById("quickAnswerStatus"),
+  transferModal: document.getElementById("transferModal"),
+  transferCloseBtn: document.getElementById("transferCloseBtn"),
+  transferGroup: document.getElementById("transferGroup"),
+  transferUser: document.getElementById("transferUser"),
+  transferMessage: document.getElementById("transferMessage"),
+  transferStatus: document.getElementById("transferStatus"),
   toastViewport: document.getElementById("toastViewport"),
   themeSelect: document.getElementById("themeSelect"),
   themeSwatches: document.getElementById("themeSwatches"),
@@ -104,6 +116,14 @@ function renderConfigStatus(text, isError = false) {
   if (!dom.configStatus) return;
   dom.configStatus.innerText = text;
   dom.configStatus.className = `status-note ${isError ? "is-error" : "is-ok"}`;
+}
+
+function renderQuickAnswerStatus(text, isError = false, isNeutral = false) {
+  if (!dom.quickAnswerStatus) return;
+  dom.quickAnswerStatus.innerText = text;
+  dom.quickAnswerStatus.className = isNeutral
+    ? "status-note is-neutral"
+    : `status-note ${isError ? "is-error" : "is-ok"}`;
 }
 
 function writeWebhookResult(data) {
@@ -191,6 +211,16 @@ function applyTheme(theme, persist = true) {
   if (persist) {
     storeTheme(nextTheme);
   }
+}
+
+function onThemeSelectChange(event) {
+  applyTheme(event.target.value, true);
+}
+
+function onThemeSwatchClick(event) {
+  const button = event.target.closest('[data-theme-value]');
+  if (!button) return;
+  applyTheme(button.dataset.themeValue, true);
 }
 
 function scheduleConversationRefresh(delayMs = 120) {
@@ -520,7 +550,7 @@ function renderEmptyMessagesState(title, body) {
 }
 
 function renderSidebarEmptyState(title, body) {
-  if (!dom.sidebar) return;
+  if (!dom.conversationList) return;
 
   const emptyState = document.createElement("article");
   emptyState.className = "message-empty";
@@ -533,14 +563,14 @@ function renderSidebarEmptyState(title, body) {
 
   emptyState.appendChild(heading);
   emptyState.appendChild(description);
-  dom.sidebar.innerHTML = "";
-  dom.sidebar.appendChild(emptyState);
+  dom.conversationList.innerHTML = "";
+  dom.conversationList.appendChild(emptyState);
 }
 
 function renderConversationList(conversations) {
-  if (!dom.sidebar) return;
+  if (!dom.conversationList) return;
 
-  dom.sidebar.innerHTML = "";
+  dom.conversationList.innerHTML = "";
 
   if (!Array.isArray(conversations) || conversations.length === 0) {
     renderSidebarEmptyState(UI_TEXT.emptyInboxTitle, UI_TEXT.emptyInboxBody);
@@ -586,7 +616,7 @@ function renderConversationList(conversations) {
     fragment.appendChild(item);
   });
 
-  dom.sidebar.appendChild(fragment);
+  dom.conversationList.appendChild(fragment);
 }
 
 function normalizeText(value) {
@@ -691,6 +721,163 @@ function closeImageModal() {
   dom.imageModal.style.display = "none";
   dom.imageModalImage.src = "";
   dom.imageModalOpenLink.href = "#";
+}
+
+function openQuickAnswerModal() {
+  if (!ensureCurrentConversation()) return;
+  if (!dom.quickAnswerModal) return;
+
+  renderQuickAnswerStatus("Completa la plantilla y confirma el envío para la conversación activa.", false, true);
+  dom.quickAnswerModal.removeAttribute("hidden");
+  dom.quickAnswerModal.style.display = "flex";
+  dom.quickAnswerModal.setAttribute("aria-hidden", "false");
+  dom.quickAnswerId?.focus();
+}
+
+function closeQuickAnswerModal() {
+  if (!dom.quickAnswerModal) return;
+
+  dom.quickAnswerModal.setAttribute("hidden", "hidden");
+  dom.quickAnswerModal.style.display = "none";
+  dom.quickAnswerModal.setAttribute("aria-hidden", "true");
+  renderQuickAnswerStatus("Selecciona una conversación y prepara la plantilla que quieres enviar.", false, true);
+}
+
+function renderTransferStatus(text, isError = false, isNeutral = false) {
+  if (!dom.transferStatus) return;
+  dom.transferStatus.innerText = text;
+  dom.transferStatus.className = isNeutral
+    ? "status-note is-neutral"
+    : `status-note ${isError ? "is-error" : "is-ok"}`;
+}
+
+async function loadGroupsAndUsers() {
+  try {
+    const [groupsRes, usersRes] = await Promise.all([
+      fetch("/groups/list"),
+      fetch("/users/list?tipo=2")
+    ]);
+
+    const groupsData = await groupsRes.json();
+    const usersData = await usersRes.json();
+
+    if (dom.transferGroup) {
+      dom.transferGroup.innerHTML = '<option value="">Sin equipo</option>';
+      if (groupsData.data) {
+        groupsData.data.forEach(group => {
+          const option = document.createElement("option");
+          option.value = group.id;
+          option.textContent = group.nombre;
+          dom.transferGroup.appendChild(option);
+        });
+      }
+    }
+
+    if (dom.transferUser) {
+      dom.transferUser.innerHTML = '<option value="">Sin agente</option>';
+      if (usersData.data) {
+        usersData.data.forEach(user => {
+          const option = document.createElement("option");
+          option.value = user.id;
+          option.textContent = user.nombre;
+          dom.transferUser.appendChild(option);
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error loading groups/users:", error);
+  }
+}
+
+async function openTransferModal() {
+  if (!ensureCurrentConversation()) return;
+  if (!dom.transferModal) return;
+
+  await loadGroupsAndUsers();
+  renderTransferStatus("Selecciona equipo y/o agente para transferir.", false, true);
+  dom.transferModal.removeAttribute("hidden");
+  dom.transferModal.style.display = "flex";
+  dom.transferModal.setAttribute("aria-hidden", "false");
+  dom.transferGroup?.focus();
+}
+
+function closeTransferModal() {
+  if (!dom.transferModal) return;
+
+  dom.transferModal.setAttribute("hidden", "hidden");
+  dom.transferModal.style.display = "none";
+  dom.transferModal.setAttribute("aria-hidden", "true");
+  renderTransferStatus("Selecciona una conversación para transferir.", false, true);
+}
+
+async function confirmTransfer() {
+  const conversationId = ensureCurrentConversation();
+  if (!conversationId) return;
+
+  const idCanal = getSelectedChannelId();
+  if (!idCanal) {
+    renderTransferStatus("Selecciona un canal primero.", true);
+    showToast("Canal requerido", "Selecciona un canal para transferir.", "info");
+    return;
+  }
+
+  const idGrupo = dom.transferGroup?.value;
+  const idUsuario = dom.transferUser?.value;
+  const mensaje = dom.transferMessage?.value?.trim();
+
+  const conversationData = state.conversations.find(c => c.id === conversationId);
+  const contactName = conversationData?.contact_name || "Usuario";
+  const celular = conversationData?.celular || "";
+
+  const payload = {
+    id_conversacion: conversationId,
+    id_canal: Number(idCanal),
+    estado: 1,
+    contacto: {
+      nombre: contactName,
+      celular: celular
+    }
+  };
+
+  if (idGrupo) {
+    payload.id_grupo = Number(idGrupo);
+  }
+
+  if (idUsuario) {
+    payload.usuario = {
+      id: String(idUsuario),
+      nombre: dom.transferUser.options[dom.transferUser.selectedIndex]?.text || ""
+    };
+  }
+
+  if (mensaje) {
+    payload.mensaje = mensaje;
+  }
+
+  renderTransferStatus("Transferiendo...", false, true);
+
+  try {
+    const response = await fetch("/transfer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (data.ok !== false && data.status === 1) {
+      renderTransferStatus("Transferencia exitosa.", false);
+      showToast("Transferencia completada", "La conversación fue transferida a LiveConnect.", "success");
+      closeTransferModal();
+    } else {
+      const errorMsg = data.status_message || data.error || "Error en transferencia";
+      renderTransferStatus(errorMsg, true);
+      showToast("Transferencia fallida", errorMsg, "error");
+    }
+  } catch (error) {
+    renderTransferStatus(`Error: ${error.message}`, true);
+    showToast("Error de red", `No se pudo transferir: ${error.message}`, "error");
+  }
 }
 
 function appendTextWithLinks(container, text) {
@@ -851,15 +1038,13 @@ function renderMessageBubble(item, messageItem) {
 
   const metadata = normalizeMetadata(messageItem?.metadata);
 
-  let messageType = normalizeText(messageItem?.message_type || "text").toLowerCase();
+  const reportedMessageType = normalizeText(messageItem?.message_type || "text").toLowerCase();
+  let messageType = reportedMessageType;
   if (!["text", "file", "link", "structured"].includes(messageType)) {
     messageType = "text";
   }
   if (messageType === "text" && fileUrl) messageType = "file";
   if (messageType === "text" && urls.length > 0) messageType = "link";
-  if (messageType === "text" && metadata && Object.keys(metadata).length > 0) {
-    messageType = "structured";
-  }
 
   let displayText = messageText;
   if (fileUrl) {
@@ -882,7 +1067,7 @@ function renderMessageBubble(item, messageItem) {
   }
 
   const metadataNode = buildMetadataPreview(metadata);
-  if (metadataNode) {
+  if (metadataNode && reportedMessageType !== "text") {
     content.appendChild(metadataNode);
   }
 
@@ -1049,7 +1234,7 @@ async function loadChannels() {
 }
 
 async function loadConversations() {
-  if (!dom.sidebar) return;
+  if (!dom.conversationList) return;
 
   try {
     const { data } = await requestJSON("/conversations");
@@ -1150,12 +1335,14 @@ async function sendQuickAnswer() {
   const rawQuickAnswerId = dom.quickAnswerId?.value?.trim();
   if (!rawQuickAnswerId) {
     renderConfigStatus("Debes ingresar el ID de respuesta para QuickAnswer.", true);
+    renderQuickAnswerStatus("Debes ingresar el ID de respuesta para QuickAnswer.", true);
     return;
   }
 
   const idRespuesta = Number.parseInt(rawQuickAnswerId, 10);
   if (!Number.isFinite(idRespuesta)) {
     renderConfigStatus("El ID de respuesta debe ser numerico.", true);
+    renderQuickAnswerStatus("El ID de respuesta debe ser numérico.", true);
     return;
   }
 
@@ -1164,6 +1351,7 @@ async function sendQuickAnswer() {
     variables = parseVariablesJSON(dom.quickAnswerVariables?.value || "{}");
   } catch (error) {
     renderConfigStatus(error.message, true);
+    renderQuickAnswerStatus(error.message, true);
     return;
   }
 
@@ -1176,14 +1364,17 @@ async function sendQuickAnswer() {
   const { res, data } = await postJSON("/sendQuickAnswer", payload);
   if (!isApiSuccess(res, data)) {
     renderConfigStatus("No se pudo enviar el QuickAnswer.", true);
+    renderQuickAnswerStatus("No se pudo enviar el QuickAnswer.", true);
     writeWebhookResult(data);
     showToast("QuickAnswer fallido", "No se pudo enviar la respuesta rápida seleccionada.", "error");
     return;
   }
 
   renderConfigStatus("QuickAnswer enviado correctamente.");
+  renderQuickAnswerStatus("QuickAnswer enviado correctamente.", false);
   writeWebhookResult(data);
   showToast("QuickAnswer enviado", "La plantilla se envió correctamente al contacto.", "success");
+  closeQuickAnswerModal();
   await loadMessages(conversationId);
 }
 
@@ -1507,6 +1698,8 @@ function refreshNow() {
 const actionHandlers = Object.freeze({
   openSettings,
   closeSettings,
+  openQuickAnswerModal,
+  closeQuickAnswerModal,
   closeImageModal,
   loadChannels,
   activateWebhook,
@@ -1517,8 +1710,11 @@ const actionHandlers = Object.freeze({
   toggleFileComposer,
   sendQuickAnswer,
   sendFile,
-  transferConversation,
+  openTransferModal,
+  closeTransferModal,
+  confirmTransfer,
   sendMessage,
+  toggleSidebar,
   refreshNow
 });
 
@@ -1561,6 +1757,12 @@ function onSettingsBackdropClick(event) {
   }
 }
 
+function onQuickAnswerBackdropClick(event) {
+  if (event.target === dom.quickAnswerModal) {
+    closeQuickAnswerModal();
+  }
+}
+
 function onImageModalClick(event) {
   if (!dom.imageModal) return;
   if (event.target === dom.imageModal) {
@@ -1572,6 +1774,7 @@ function onDocumentKeyDown(event) {
   if (event.key === "Escape") {
     closeImageModal();
     closeSettings();
+    closeQuickAnswerModal();
   }
 }
 
@@ -1592,8 +1795,8 @@ function bindEvents() {
     }
   });
 
-  if (dom.sidebar) {
-    dom.sidebar.addEventListener("click", onConversationClick);
+  if (dom.conversationList) {
+    dom.conversationList.addEventListener("click", onConversationClick);
   }
 
   if (dom.channelSelect) {
@@ -1608,6 +1811,10 @@ function bindEvents() {
     dom.settingsPanel.addEventListener("click", onSettingsBackdropClick);
   }
 
+  if (dom.quickAnswerModal) {
+    dom.quickAnswerModal.addEventListener("click", onQuickAnswerBackdropClick);
+  }
+
   if (dom.imageModal) {
     dom.imageModal.addEventListener("click", onImageModalClick);
   }
@@ -1615,14 +1822,45 @@ function bindEvents() {
   if (dom.imageModalCloseBtn) {
     dom.imageModalCloseBtn.addEventListener("click", closeImageModal);
   }
+
+  // Theme listeners
+  if (dom.themeSelect) {
+    dom.themeSelect.addEventListener("change", onThemeSelectChange);
+  }
+  if (dom.themeSwatches) {
+    dom.themeSwatches.addEventListener("click", onThemeSwatchClick);
+  }
+}
+
+function toggleSidebar() {
+  const isCollapsed = dom.appFrame?.classList.toggle("is-sidebar-collapsed");
+  dom.sidebarShell?.classList.toggle("collapsed", Boolean(isCollapsed));
+  dom.sidebarToggle?.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+  try {
+    localStorage.setItem("sidebarCollapsed", String(isCollapsed));
+  } catch (_) {}
 }
 
 function initApp() {
   closeImageModal();
   closeSettings();
+  closeQuickAnswerModal();
+  
+  // Restore sidebar state
+  const sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
+  if (sidebarCollapsed) {
+    dom.appFrame?.classList.add("is-sidebar-collapsed");
+    dom.sidebarShell?.classList.add("collapsed");
+    dom.sidebarToggle?.setAttribute("aria-expanded", "false");
+  }
+  
   setConversationContext(null);
   renderEmptyMessagesState(UI_TEXT.noConversationTitle, UI_TEXT.noConversationMeta);
   syncConversationControls();
+  
+  // Apply stored theme on load
+  applyTheme(getInitialTheme(), false);
+  
   bindEvents();
   loadConversations();
   connectEventStream();

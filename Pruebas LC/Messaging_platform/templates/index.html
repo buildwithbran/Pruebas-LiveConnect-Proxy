@@ -11,17 +11,25 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
 </head>
 <body>
-  <div class="app-frame">
-    <aside class="sidebar-shell">
+  <div id="app" class="app-frame">
+    <aside id="sidebarShell" class="sidebar-shell" aria-label="Configuración lateral">
+      <button
+        type="button"
+        class="sidebar-toggle"
+        id="sidebarToggle"
+        data-action="toggleSidebar"
+        aria-controls="sidebarShell"
+        aria-expanded="true"
+        title="Minimizar panel lateral"
+      >
+        ☰
+      </button>
       <div class="sidebar-panel">
         <div class="sidebar-header">
           <div class="sidebar-copy">
             <p class="eyebrow">LiveConnect®</p>
             <h1>Proxy Inbox</h1>
             <p class="sidebar-description">Centro operativo para conversaciones, webhooks, archivos y automatizaciones del proxy.</p>
-          </div>
-          <div id="configButton" class="config-shortcut">
-            <button type="button" class="icon-button" data-action="openSettings" title="Configuración">⚙</button>
           </div>
         </div>
 
@@ -31,29 +39,23 @@
             <strong id="sseStatus">🔴 Conectando...</strong>
             <span class="insight-meta">Eventos en tiempo real · <a href="#" id="refreshNowBtn" style="cursor:pointer;text-decoration:underline">Actualizar</a></span>
           </article>
-          <article class="insight-card insight-card--accent">
-            <span class="insight-label">Bandeja</span>
-            <strong id="conversationCount">0 conversaciones</strong>
-            <span class="insight-meta">Selecciona una conversación para abrir el timeline.</span>
-          </article>
         </div>
 
         <section class="theme-panel" aria-label="Temas de interfaz">
           <div class="theme-panel__header">
             <div>
               <p class="eyebrow">Apariencia</p>
-              <h3>5 temas</h3>
+              <h3>Temas</h3>
             </div>
-            <select id="themeSelect" aria-label="Seleccionar tema">
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-              <option value="sage">Sage</option>
-              <option value="sunset">Sunset</option>
-              <option value="midnight-blue">Midnight Blue</option>
-              <option value="neon-industrial">Neon Industrial</option>
-            </select>
           </div>
-
+          <select id="themeSelect" aria-label="Seleccionar tema">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="sage">Sage</option>
+            <option value="sunset">Sunset</option>
+            <option value="midnight-blue">Midnight Blue</option>
+            <option value="neon-industrial">Neon Industrial</option>
+          </select>
           <div class="theme-swatches" id="themeSwatches">
             <button type="button" class="theme-swatch" data-theme-value="light" aria-pressed="false">
               <span class="theme-swatch__preview theme-swatch__preview--light" aria-hidden="true"></span>
@@ -81,18 +83,21 @@
             </button>
           </div>
         </section>
-
-        <div class="sidebar-list-shell">
-          <div class="list-heading">
-            <p>Conversaciones</p>
-            <span class="list-badge">Tiempo real</span>
-          </div>
-          <div id="sidebar" class="conversation-list"></div>
-        </div>
       </div>
     </aside>
 
-    <main id="chat" class="chat-shell">
+    <section id="conversationsPane" class="conversations-shell" aria-label="Conversaciones en tiempo real">
+      <div class="list-heading">
+        <div class="list-heading__copy">
+          <p>Conversaciones</p>
+          <span class="list-badge">Tiempo real</span>
+        </div>
+        <span id="conversationCount" class="conversation-count">0 conversaciones</span>
+      </div>
+      <div id="conversationList" class="conversation-list"></div>
+    </section>
+
+    <main id="inbox-operativo" class="inbox-shell">
       <header class="chat-header">
         <div class="chat-header-copy">
           <p class="eyebrow">Inbox operativo</p>
@@ -101,10 +106,11 @@
         </div>
 
         <div id="top-actions" class="action-bar">
+          <button type="button" class="ghost-action" data-action="openSettings">Configuración</button>
           <button type="button" class="ghost-action" data-action="checkBalance">Saldo</button>
-          <button type="button" class="ghost-action" data-action="sendQuickAnswer" data-requires-conversation="true">QuickAnswer</button>
+          <button type="button" class="ghost-action" data-action="openQuickAnswerModal" data-requires-conversation="true">QuickAnswer</button>
           <button type="button" class="ghost-action" data-action="toggleFileComposer" data-requires-conversation="true">Enviar Archivo</button>
-          <button type="button" class="ghost-action ghost-action--danger" data-action="transferConversation" data-requires-conversation="true">Transferir</button>
+          <button type="button" class="ghost-action ghost-action--danger" data-action="openTransferModal" data-requires-conversation="true">Transferir</button>
         </div>
       </header>
 
@@ -158,7 +164,7 @@
         <div>
           <p class="eyebrow">Control del proxy</p>
           <h2>Configuración avanzada</h2>
-          <p>Gestiona webhooks, canales, quick answers, archivos y consultas operativas desde un solo panel.</p>
+          <p>Gestiona webhooks, canales, archivos y consultas operativas desde un solo panel.</p>
         </div>
         <button id="closeSettingsBtn" type="button" class="icon-button icon-button--ghost" data-action="closeSettings">✕</button>
       </div>
@@ -198,23 +204,6 @@
 URL configurada: no consultada
 Mensaje API: no consultado</div>
           <div id="webhookResult">Sin resultados aún.</div>
-        </section>
-
-        <section class="settings-section">
-          <div class="section-title">
-            <h3>QuickAnswer</h3>
-            <p>Dispara respuestas preconfiguradas sobre la conversación activa.</p>
-          </div>
-
-          <label for="quickAnswerId">ID Respuesta</label>
-          <input id="quickAnswerId" placeholder="ID Respuesta" />
-
-          <label for="quickAnswerVariables">Variables (JSON)</label>
-          <textarea id="quickAnswerVariables" rows="7" placeholder='{"visitante.nombre":"Juan","pedido.numero":"1234"}'>{}</textarea>
-
-          <div class="row-actions">
-            <button type="button" data-action="sendQuickAnswer" data-requires-conversation="true">Enviar QuickAnswer</button>
-          </div>
         </section>
 
         <section class="settings-section">
@@ -263,6 +252,81 @@ Mensaje API: no consultado</div>
 
           <div id="configStatus" class="status-note is-neutral">Esperando acción.</div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="quickAnswerModal" hidden class="modal-overlay quick-answer-modal" aria-hidden="true">
+    <div class="modal-card quick-answer-card" role="dialog" aria-modal="true" aria-labelledby="quickAnswerTitle">
+      <div class="quick-answer-card__header">
+        <div>
+          <p class="eyebrow">Respuesta rápida</p>
+          <h2 id="quickAnswerTitle">Enviar QuickAnswer</h2>
+          <p>Usa la conversación activa para disparar una plantilla con variables opcionales.</p>
+        </div>
+        <button
+          id="quickAnswerCloseBtn"
+          type="button"
+          class="icon-button icon-button--ghost"
+          data-action="closeQuickAnswerModal"
+          aria-label="Cerrar modal de QuickAnswer"
+        >
+          ✕
+        </button>
+      </div>
+
+      <label for="quickAnswerId">ID Respuesta</label>
+      <input id="quickAnswerId" placeholder="ID Respuesta" />
+
+      <label for="quickAnswerVariables">Variables (JSON)</label>
+      <textarea id="quickAnswerVariables" rows="7" placeholder='{"visitante.nombre":"Juan","pedido.numero":"1234"}'>{}</textarea>
+
+      <div id="quickAnswerStatus" class="status-note is-neutral">Selecciona una conversación y prepara la plantilla que quieres enviar.</div>
+
+      <div class="row-actions quick-answer-card__actions">
+        <button type="button" class="ghost-action" data-action="closeQuickAnswerModal">Cancelar</button>
+        <button type="button" data-action="sendQuickAnswer" data-requires-conversation="true">Enviar QuickAnswer</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="transferModal" hidden class="modal-overlay quick-answer-modal" aria-hidden="true">
+    <div class="modal-card quick-answer-card" role="dialog" aria-modal="true" aria-labelledby="transferTitle">
+      <div class="quick-answer-card__header">
+        <div>
+          <p class="eyebrow">Transferir</p>
+          <h2 id="transferTitle">Transferir a LiveConnect</h2>
+          <p>Selecciona un equipo y/o agente para asignar la conversación.</p>
+        </div>
+        <button
+          id="transferCloseBtn"
+          type="button"
+          class="icon-button icon-button--ghost"
+          data-action="closeTransferModal"
+          aria-label="Cerrar modal de transferencia"
+        >
+          ✕
+        </button>
+      </div>
+
+      <label for="transferGroup">Equipo (Grupo)</label>
+      <select id="transferGroup">
+        <option value="">Sin equipo</option>
+      </select>
+
+      <label for="transferUser">Agente (Usuario)</label>
+      <select id="transferUser">
+        <option value="">Sin agente</option>
+      </select>
+
+      <label for="transferMessage">Mensaje inicial (opcional)</label>
+      <textarea id="transferMessage" rows="3" placeholder="Contexto para el agente..."></textarea>
+
+      <div id="transferStatus" class="status-note is-neutral">Selecciona una conversación para transferir.</div>
+
+      <div class="row-actions quick-answer-card__actions">
+        <button type="button" class="ghost-action" data-action="closeTransferModal">Cancelar</button>
+        <button type="button" data-action="confirmTransfer" data-requires-conversation="true">Transferir</button>
       </div>
     </div>
   </div>

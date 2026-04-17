@@ -2,13 +2,11 @@ import os
 import time
 
 import requests
+from dotenv import load_dotenv
 
 
 TOKEN = None
 TOKEN_EXPIRA = 0
-
-KEY = os.getenv("LIVECONNECT_KEY", "").strip()
-SECRET = os.getenv("LIVECONNECT_SECRET", "").strip()
 
 
 class TokenProviderError(RuntimeError):
@@ -24,6 +22,13 @@ def reset_token_cache():
 def get_token():
     global TOKEN, TOKEN_EXPIRA
 
+    load_dotenv()
+    KEY = os.getenv("LIVECONNECT_KEY", "").strip()
+    SECRET = os.getenv("LIVECONNECT_SECRET", "").strip()
+
+    if not KEY or not SECRET:
+        raise TokenProviderError("Se requiere un cKey y un privateKey")
+
     if TOKEN and time.time() < TOKEN_EXPIRA:
         return TOKEN
 
@@ -31,6 +36,7 @@ def get_token():
         response = requests.post(
             "https://api.liveconnect.chat/prod/account/token",
             json={"cKey": KEY, "privateKey": SECRET},
+            headers={"Accept": "application/json, application/xml"},
             timeout=20,
         )
     except requests.RequestException as error:

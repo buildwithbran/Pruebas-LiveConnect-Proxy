@@ -3,12 +3,20 @@ from core.contracts import ProviderResult
 
 def normalize_json_response(response):
     try:
-        payload = response.json()
+        text = response.text.strip()
+        if not text:
+            payload = {}
+        else:
+            payload = response.json()
     except ValueError:
         payload = {"raw_response": response.text}
 
+    is_success = response.status_code == 200 and (
+        not payload or payload.get("status") == 1
+    )
+
     return ProviderResult(
-        ok=bool(response.ok),
+        ok=is_success,
         status_code=int(response.status_code),
         payload=payload,
     )

@@ -1,11 +1,15 @@
 from queue import Empty
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from core.message_router import MessageRouter
 from Inbox.conversations import get_conversations
 from Inbox.messages import get_messages
 from DB.database import init_db
+from services.liveconnect.users import list_groups, list_users
 from services.realtime import format_sse, subscribe, unsubscribe
 
 init_db()
@@ -61,6 +65,18 @@ def balance_route():
 def config_channels():
     filters = request.args.to_dict()
     return _execute("config.channels", filters)
+
+
+@app.route("/users/list", methods=["GET"])
+def users_list():
+    filters = request.args.to_dict()
+    return jsonify(list_users(filters))
+
+
+@app.route("/groups/list", methods=["GET"])
+def groups_list():
+    filters = request.args.to_dict()
+    return jsonify(list_groups(filters))
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
 def api_get_messages(conversation_id):
