@@ -8,7 +8,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 from core.message_router import MessageRouter
 from Inbox.conversations import get_conversations
 from Inbox.messages import get_messages
-from DB.database import init_db
+from DB.database import init_db, default_repository
 from services.liveconnect.users import list_groups, list_users
 from services.realtime import format_sse, subscribe, unsubscribe
 
@@ -80,7 +80,52 @@ def groups_list():
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
 def api_get_messages(conversation_id):
-    return jsonify(get_messages(conversation_id))
+    cursor = request.args.get("cursor")
+    limit = request.args.get("limit", 20)
+    return jsonify(get_messages(conversation_id, cursor=cursor, limit=limit))
+
+
+@app.route("/conversation/archive", methods=["POST"])
+def archive_conversation_route():
+    payload = request.get_json(silent=True) or {}
+    conversation_id = payload.get("id_conversacion") or payload.get("conversation_id")
+    archived = payload.get("archived")
+
+    if not conversation_id:
+        return jsonify({"ok": False, "error": "id_conversacion es requerido"}), 400
+
+    archived_flag = bool(archived) if archived is not None else True
+    default_repository.set_conversation_archived(conversation_id, archived=archived_flag)
+    return jsonify({"ok": True, "archived": archived_flag})
+
+
+@app.route("/conversation/read", methods=["POST"])
+def mark_conversation_read_route():
+    payload = request.get_json(silent=True) or {}
+    conversation_id = payload.get("id_conversacion") or payload.get("conversation_id")
+
+    if not conversation_id:
+        return jsonify({"ok": False, "error": "id_conversacion es requerido"}), 400
+
+    default_repository.mark_conversation_read(conversation_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/proxy/sendMessage", methods=["POST"])
+@app.route("/proxy/sendQuickAnswer", methods=["POST"])
+@app.route("/proxy/sendFile", methods=["POST"])
+@app.route("/proxy/transfer", methods=["POST"])
+def api_proxy_aliases():
+    path = request.path
+    if path.endswith("/sendMessage"):
+        return _execute("message.send", _payload())
+    if path.endswith("/sendQuickAnswer"):
+        return _execute("message.send_quick_answer", _payload())
+    if path.endswith("/sendFile"):
+        return _execute("message.send_file", _payload())
+    if path.endswith("/transfer"):
+        return _execute("conversation.transfer", _payload())
+    return jsonify({"ok": False, "error": "Ruta proxy no soportada"}), 404
 
 
 @app.route("/events/stream", methods=["GET"])

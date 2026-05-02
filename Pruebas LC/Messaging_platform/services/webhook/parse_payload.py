@@ -150,6 +150,19 @@ def _extract_contact_name(data):
         if normalized:
             return normalized
 
+    if isinstance(data.get("nombre"), str):
+        normalized = data["nombre"].strip()
+        if normalized:
+            return normalized
+
+    contacto = data.get("contacto")
+    if isinstance(contacto, dict):
+        name = contacto.get("nombre") or contacto.get("name")
+        if isinstance(name, str):
+            normalized = name.strip()
+            if normalized:
+                return normalized
+
     contact_data = data.get("contact_data")
     if isinstance(contact_data, dict):
         name = contact_data.get("name")
@@ -157,6 +170,32 @@ def _extract_contact_name(data):
             normalized = name.strip()
             if normalized:
                 return normalized
+
+    return None
+
+
+def _extract_celular(data):
+    celular = _normalize_text(data.get("celular"))
+    if celular:
+        return celular
+
+    contacto = data.get("contacto")
+    if isinstance(contacto, dict):
+        celular = _normalize_text(contacto.get("celular"))
+        if celular:
+            return celular
+
+    contact_data = data.get("contact_data")
+    if isinstance(contact_data, dict):
+        celular = _normalize_text(contact_data.get("celular"))
+        if celular:
+            return celular
+
+    message_obj = _get_message_object(data)
+    if message_obj:
+        f_id = message_obj.get("f_id")
+        if f_id is not None:
+            return _normalize_text(f_id)
 
     return None
 
@@ -195,5 +234,6 @@ def parse_payload(data):
         message_type=_build_message_type(message_obj, file_payload, urls),
         file=file_payload,
         contact_name=_extract_contact_name(data),
+        celular=_extract_celular(data),
         metadata=_build_metadata(data, message_obj, file_payload, urls),
     )

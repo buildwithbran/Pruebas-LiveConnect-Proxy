@@ -45,41 +45,16 @@
           <div class="theme-panel__header">
             <div>
               <p class="eyebrow">Apariencia</p>
-              <h3>Temas</h3>
+              <h3>Modo activo</h3>
             </div>
           </div>
           <select id="themeSelect" aria-label="Seleccionar tema">
-            <option value="light">Light</option>
             <option value="dark">Dark</option>
-            <option value="sage">Sage</option>
-            <option value="sunset">Sunset</option>
-            <option value="midnight-blue">Midnight Blue</option>
-            <option value="neon-industrial">Neon Industrial</option>
           </select>
           <div class="theme-swatches" id="themeSwatches">
-            <button type="button" class="theme-swatch" data-theme-value="light" aria-pressed="false">
-              <span class="theme-swatch__preview theme-swatch__preview--light" aria-hidden="true"></span>
-              <span class="theme-swatch__label">Light</span>
-            </button>
             <button type="button" class="theme-swatch" data-theme-value="dark" aria-pressed="false">
               <span class="theme-swatch__preview theme-swatch__preview--dark" aria-hidden="true"></span>
               <span class="theme-swatch__label">Dark</span>
-            </button>
-            <button type="button" class="theme-swatch" data-theme-value="sage" aria-pressed="false">
-              <span class="theme-swatch__preview theme-swatch__preview--sage" aria-hidden="true"></span>
-              <span class="theme-swatch__label">Sage</span>
-            </button>
-            <button type="button" class="theme-swatch" data-theme-value="sunset" aria-pressed="false">
-              <span class="theme-swatch__preview theme-swatch__preview--sunset" aria-hidden="true"></span>
-              <span class="theme-swatch__label">Sunset</span>
-            </button>
-            <button type="button" class="theme-swatch" data-theme-value="midnight-blue" aria-pressed="false">
-              <span class="theme-swatch__preview theme-swatch__preview--midnight-blue" aria-hidden="true"></span>
-              <span class="theme-swatch__label">Midnight</span>
-            </button>
-            <button type="button" class="theme-swatch" data-theme-value="neon-industrial" aria-pressed="false">
-              <span class="theme-swatch__preview theme-swatch__preview--neon-industrial" aria-hidden="true"></span>
-              <span class="theme-swatch__label">Neon Ind.</span>
             </button>
           </div>
         </section>
@@ -99,64 +74,102 @@
 
     <main id="inbox-operativo" class="inbox-shell">
       <header class="chat-header">
-        <div class="chat-header-copy">
-          <p class="eyebrow">Inbox operativo</p>
-          <h2 id="conversationTitle">Selecciona una conversación</h2>
-          <p id="conversationMeta">Las conversaciones entrantes y salientes aparecerán aquí en tiempo real.</p>
+        <div class="chat-header-main">
+          <button
+            type="button"
+            class="mobile-nav-toggle"
+            id="mobileNavToggle"
+            data-action="toggleSidebar"
+            aria-controls="sidebarShell conversationsPane"
+            aria-expanded="false"
+            title="Abrir navegación"
+          >
+            ☰
+          </button>
+          <div class="chat-header-copy">
+            <p class="eyebrow">Inbox operativo</p>
+            <h2 id="conversationTitle">Selecciona una conversación</h2>
+            <p id="conversationMeta">Las conversaciones entrantes y salientes aparecerán aquí en tiempo real.</p>
+          </div>
         </div>
 
         <div id="top-actions" class="action-bar">
           <button type="button" class="ghost-action" data-action="openSettings">Configuración</button>
-          <button type="button" class="ghost-action" data-action="checkBalance">Saldo</button>
-          <button type="button" class="ghost-action" data-action="openQuickAnswerModal" data-requires-conversation="true">QuickAnswer</button>
-          <button type="button" class="ghost-action" data-action="toggleFileComposer" data-requires-conversation="true">Enviar Archivo</button>
-          <button type="button" class="ghost-action ghost-action--danger" data-action="openTransferModal" data-requires-conversation="true">Transferir</button>
+          <button type="button" class="ghost-action ghost-action--primary" data-action="openTransferModal" data-requires-conversation="true">Transferir</button>
+          <div class="conversation-actions-menu" id="conversationActionsMenu">
+            <button
+              type="button"
+              class="ghost-action conversation-actions-menu__toggle"
+              id="conversationActionsToggle"
+              data-action="toggleConversationActionsDropdown"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              ⋯ Acciones
+            </button>
+            <div
+              id="conversationActionsDropdown"
+              class="conversation-actions-dropdown"
+              role="menu"
+              hidden
+            >
+              <button type="button" class="conversation-actions-dropdown__item" data-action="checkBalance" role="menuitem">Saldo</button>
+              <button type="button" class="conversation-actions-dropdown__item" data-action="archiveCurrentConversation" data-requires-conversation="true" role="menuitem">Archivar / Desarchivar</button>
+              <button type="button" class="conversation-actions-dropdown__item" data-action="markCurrentConversationRead" data-requires-conversation="true" role="menuitem">Marcar como leído</button>
+              <button type="button" class="conversation-actions-dropdown__item" data-action="openQuickAnswerModal" data-requires-conversation="true" role="menuitem">QuickAnswer</button>
+              <button type="button" class="conversation-actions-dropdown__item" data-action="toggleFileComposer" data-requires-conversation="true" role="menuitem">Enviar archivo</button>
+            </div>
+          </div>
         </div>
       </header>
 
-      <section id="fileComposer" class="composer-tray" hidden>
-        <div class="composer-tray__header">
-          <div>
-            <p class="eyebrow">Adjuntos</p>
-            <h3>Enviar archivo por URL pública</h3>
+      <section class="chat-stage" aria-label="Historial y composición del chat">
+        <section id="fileComposer" class="composer-tray" hidden>
+          <div class="composer-tray__header">
+            <div>
+              <p class="eyebrow">Adjuntos</p>
+              <h3>Enviar archivo por URL pública</h3>
+            </div>
           </div>
-        </div>
-        <div class="composer-tray__grid">
-          <input id="chatFileUrl" placeholder="URL pública del archivo (https://...)" />
-          <div class="composer-tray__row">
-            <input id="chatFileName" placeholder="Nombre del archivo" />
-            <select id="chatFileExtension">
-              <option value="">Extensión</option>
-              <option value="pdf">pdf</option>
-              <option value="jpg">jpg</option>
-              <option value="jpeg">jpeg</option>
-              <option value="png">png</option>
-              <option value="doc">doc</option>
-              <option value="docx">docx</option>
-              <option value="xls">xls</option>
-              <option value="xlsx">xlsx</option>
-              <option value="csv">csv</option>
-              <option value="txt">txt</option>
-            </select>
-            <button type="button" data-action="sendFile" data-requires-conversation="true">Enviar</button>
+          <div class="composer-tray__grid">
+            <input id="chatFileUrl" placeholder="URL pública del archivo (https://...)" />
+            <div class="composer-tray__row">
+              <input id="chatFileName" placeholder="Nombre del archivo" />
+              <select id="chatFileExtension">
+                <option value="">Extensión</option>
+                <option value="pdf">pdf</option>
+                <option value="jpg">jpg</option>
+                <option value="jpeg">jpeg</option>
+                <option value="png">png</option>
+                <option value="doc">doc</option>
+                <option value="docx">docx</option>
+                <option value="xls">xls</option>
+                <option value="xlsx">xlsx</option>
+                <option value="csv">csv</option>
+                <option value="txt">txt</option>
+              </select>
+              <button type="button" data-action="sendFile" data-requires-conversation="true">Enviar</button>
+            </div>
           </div>
-        </div>
+        </section>
+
+        <section id="messages" class="messages-stage"></section>
+
+        <footer class="composer-footer">
+          <div class="composer-footer__meta">
+            <span id="composerHint">Selecciona una conversación para habilitar la respuesta.</span>
+          </div>
+
+          <div id="input-box" class="input-shell">
+            <input id="messageInput" placeholder="Escribe un mensaje..." />
+            <button type="button" data-action="sendMessage" data-requires-conversation="true">Enviar</button>
+          </div>
+        </footer>
       </section>
-
-      <section id="messages" class="messages-stage"></section>
-
-      <footer class="composer-footer">
-        <div class="composer-footer__meta">
-          <span id="composerHint">Selecciona una conversación para habilitar la respuesta.</span>
-        </div>
-
-        <div id="input-box" class="input-shell">
-          <input id="messageInput" placeholder="Escribe un mensaje..." />
-          <button type="button" data-action="sendMessage" data-requires-conversation="true">Enviar</button>
-        </div>
-      </footer>
     </main>
   </div>
+
+  <div id="mobileNavBackdrop" class="mobile-nav-backdrop" hidden></div>
 
   <div id="settingsPanel" class="settings-overlay">
     <div id="settingsCard" class="settings-card">

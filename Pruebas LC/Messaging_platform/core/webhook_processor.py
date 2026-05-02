@@ -26,7 +26,12 @@ class WebhookProcessor:
                 "error": validation.error or "Mensaje invalido",
             }
 
-        if validation.ignored:
+        has_contact_info = bool(
+            getattr(normalized_message, "contact_name", None)
+            or getattr(normalized_message, "celular", None)
+        )
+
+        if validation.ignored and not has_contact_info:
             return {
                 "status": "ignored",
                 "ok": True,

@@ -10,6 +10,7 @@ class NormalizedIncomingMessage:
     message_type: str
     file: dict[str, Any] | None = None
     contact_name: str | None = None
+    celular: int | None = None
     metadata: dict[str, Any] | None = None
 
 

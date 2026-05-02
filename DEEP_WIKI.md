@@ -1,689 +1,332 @@
-# Deep Wiki — Pruebas‑LiveConnect‑Proxy
+# Deep Wiki - Pruebas-LiveConnect-Proxy
 
 ## Resumen ejecutivo
-Repositorio de pruebas internas para métodos API de LiveConnect. Implementa un backend Flask que sirve una interfaz web tipo "Inbox" y actúa como proxy hacia la API `https://api.liveconnect.chat`, además de recibir webhooks y persistir conversaciones/mensajes en SQLite. Está diseñado para uso interno (maneja credenciales sensibles). La arquitectura se basa en un sistema de **Agentes + Skills** coordinados por `MessageRouter`, con sincronización evento-dirigida pura via SSE.
-
-## Actualizacion de calidad y diseno (19 de febrero de 2026)
-Se aplico una mejora incremental en backend y frontend siguiendo principios SOLID/clean code, sin cambiar contratos publicos principales de la app.
-
-### Backend
-- `Repository pattern`: se centralizo el acceso a SQLite en `SQLiteRepository`.
-- `Service layer`: el procesamiento de webhook se extrajo a `services/webhook_service.py`.
-- `Dependency Injection`: el servicio acepta repositorio inyectable para facilitar testing.
-- `Fail Fast`: el webhook valida payload y `id_conversacion` antes de persistir.
-- `Single Responsibility`: `metodos/Webhook.py` ahora solo delega al servicio.
-
-### Frontend (`templates` + `static`)
-- `Separation of Concerns`: se eliminaron handlers inline (`onclick`) y estilos inline.
-- `Open/Closed`: acciones UI desacopladas con `data-action` + mapa de handlers.
-- `DRY/KISS`: capa de utilidades (`requestJSON`, `postJSON`, `isApiSuccess`) para reducir duplicacion de `fetch`.
-- `Replace Magic Numbers`: constantes centralizadas para polling, `id_respuesta` e `id_canal`.
-- `Funciones pequenas`: renderizado, eventos y llamadas API separados por responsabilidad.
-
-### Testing y calidad
-- Se agregaron tests unitarios deterministas en `Pruebas LC/Messaging_platform/tests/`.
-- Ejecucion: `python3 -m unittest discover -s tests -v` (actualmente en verde).
-
-## Arquitectura de Agentes (Actualización 14 de abril de 2026)
-El proyecto ha evolucionado a una arquitectura basada en **Agentes + Skills**, coordinados por `MessageRouter`. Esto reemplaza la estructura directa de Flask por un sistema modular y extensible.
-
-### Agentes Principales
-
-- **MessageRouter**: Clasifica operaciones HTTP y delega al agente correcto. Mantiene un diccionario de rutas con 9 operaciones soportadas.
-- **WebhookProcessor**: Procesa webhooks entrantes con pipeline `parse_payload` → `validate_message` → `store_message`. Publica eventos SSE tras persistir.
-- **OutboundMessageAgent**: Centraliza operaciones salientes: `sendMessage`, `sendFile`, `sendQuickAnswer`, `transfer`.
-- **ConfigurationAgent**: Maneja configuración: `setWebhook`, `getWebhook`, `getBalance`, `getChannels`.
-
-### Skills
-
-- **Webhook Skills** (`services/webhook/`): `parse-payload`, `validate-message`, `store-message`.
-- **LiveConnect Skills** (`services/liveconnect/`): `send-message`, `send-file`, `send-quick-answer`, `transfer`, `set-webhook`, `get-webhook`, `get-balance`, `get-channels`.
-- **Infraestructura**: Token provider, response normalizer, realtime pub/sub.
-
-### Mapa de Capacidades Actualizado
-
-- `POST /webhook/liveconnect` → `MessageRouter` → `WebhookProcessor` → Webhook Skills → `store-message` (publica SSE)
-- `POST /sendMessage|/sendFile|/sendQuickAnswer|/transfer` → `MessageRouter` → `OutboundMessageAgent` → LiveConnect Skills
-- `POST /setWebhook|/getWebhook`, `GET /balance`, `GET /config/channels` → `MessageRouter` → `ConfigurationAgent` → LiveConnect Skills
-- `GET /conversations`, `GET /messages/<conversation_id>` permanecen como lecturas directas de Inbox/Repository.
-- `GET /events/stream` → Realtime Service (SSE pub/sub)
-
-## Mejoras de UI/UX y Sincronización Evento-Dirigida (12 de abril de 2026)
-
-### UI/UX Retro-Futurístico Industrial
-Se aplicó la habilidad `frontend-design` para transformar la interfaz con una estética distintiva y memorable.
-
-**Tipografía**
-- Google Fonts: `IBM Plex Mono` (monospace técnico) + `Courier Prime` (retro typewriter)
-- Reemplazo de stack genérico (`Avenir Next`, `Segoe UI`) por fuentes characterful
-
-**Tema Neon Industrial (6º tema)**
-- **Colores primarios**: Cyan neon `#00d4ff`, Magenta `#ff006e`
-- **Accents**: Cyan brillante `#00ffff`, Hot pink `#ff3366`
-- **Base**: Navy profundo con overlay de grid retro `#0a0f1f`
-- **Shadows**: Dobles sombras neon (cyan + magenta, 20-40px blur) para efecto neón auténtico
-
-**Animaciones y Motion**
-- `@keyframes staggerIn`: Fade/slide on-load con stagger de 100-150ms entre elementos
-- `@keyframes neonGlow`: Pulse 3-4s repetido con intensidad variable (cyan + magenta)
-- `@keyframes glitch`: Efecto glitch retro para máxima fidelidad visual
-- Aplicadas a componentes críticos: `.icon-button--neon`, `.insight-card--neon-pulse`, `.insight-card--neon-glow`
-
-**Detalles Visuales**
-- `.theme-panel--metallic`: Inset borders neon + effect de relieve metallic
-- Grid backdrop: Patrón 28x28px en overlay semi-transparente (0.8 opacity)
-- Border gradients: Transiciones diagonales en elementos key
-- Seletor de temas: 6 opciones visuales (light, dark, sage, sunset, midnight-blue, neon-industrial)
-
-**Archivos modificados**
-- `Pruebas LC/Messaging_platform/templates/index.html`: Links de Google Fonts, 6º swatch en selector
-- `Pruebas LC/Messaging_platform/static/main.css`: Variables neon, @keyframes, estilos actualiza
-- `Pruebas LC/Messaging_platform/static/main.js`: Registro de tema en array `THEMES`
-
-### Sincronización Evento-Dirigida Pura (Event-Driven SSE)
-Se optimizó la sincronización para eliminar polling automático fallback y proporcionar visibilidad total del estado SSE.
-
-**Arquitectura**
-- **Backend**: `/events/stream` (SSE) dispara `publish("message.updated")` cuando webhook guarda mensaje
-- **Frontend**: `connectEventStream()` escucha eventos SSE e invoca `loadConversations()` / `loadMessages()`
-- **Webhook flow**: Payload → WebhookProcessor → store_message → repository.save_message() → publish() → SSE → UI
-
-**Indicador Visual de Conexión**
-- **Panel de estado** (sidebar superior): Conexión SSE con emoji + color
-  - 🟢 **Conectado**: SSE activo, eventos en tiempo real (color: `var(--brand)`)
-  - 🔴 **Sin conexión**: SSE down, requiere refresco manual (color: `var(--danger)`)
-- **Estado inicial**: 🔴 "Conectando..." → 🟢 "Conectado" (0-2s)
-- **Reconexión automática**: Si SSE falla, reintenta cada 3s con logging visible
-
-**Botón "Actualizar" Manual**
-- Ubicado en panel de estado (inline con indicador SSE)
-- Acción: Refresca conversaciones + mensajes actuales con `refreshNow()`
-- **Crítico**: Sin polling automático fallback, solo manual si usuario lo requiere
-
-**Mejoras en Logging (Dev Console)**
-- `✅ SSE conectado` cuando stream.ready
-- `📨 Evento recibido: message.updated` por cada evento SSE
-- `⚠️ SSE desconectado, reconectando...` cuando falla ConnectionError
-- `❌ Error procesando evento: <error>` si JSON parse falla
-- Todos los logs son visibles en navegador DevTools → Console
-
-**Cambios en Frontend**
-- `updateSSEIndicator()`: Nueva función que sincroniza visual 🟢/🔴 con estado `state.eventStreamConnected`
-- `connectEventStream()` mejorado: Logging, reconexión automática, mejor manejo de errores
-- `refreshNow()`: Nueva acción para refresco manual explícito (sin esperar evento)
-- `dom.sseStatus`, `dom.refreshNowBtn`: Nuevas referencias del DOM
-
-**Cambios en HTML**
-- Reemplazo de insight-card "Estado: Sincronización activa" por "Conexión SSE: [🟢/🔴]"
-- Nuevo elemento `id="sseStatus"` (strong) para indicador
-- Nuevo elemento `id="refreshNowBtn"` (inline link) para botón Actualizar
-- Clase `.insight-card--neon-pulse` aplicada para visibilidad neon
-
-**Arquitectura Confirmada**
-- No había polling escondido (`setInterval`/`setTimeout` con 5s/2s)
-- `state.eventStreamConnected` es la fuente de verdad
-- Si EventSource no está disponible (navegador viejo), toast informa + fallback manual
-- Reconexión es automática pero visible (no silenciosa)
-
-**Archivos modificados**
-- `Pruebas LC/Messaging_platform/templates/index.html`: Nuevo panel SSE + botón Actualizar
-- `Pruebas LC/Messaging_platform/static/main.js`: `updateSSEIndicator()`, `connectEventStream()` mejorado, `refreshNow()`, binding de eventos
-
-## Arquitectura de Agentes (Actualización 14 de abril de 2026)
-
-El proyecto ha evolucionado a una arquitectura basada en **Agentes + Skills**, coordinados por `MessageRouter`. Esto reemplaza la estructura directa de Flask por un sistema modular y extensible.
-
-### Agentes Principales
-
-- **MessageRouter**: Clasifica operaciones HTTP y delega al agente correcto. Mantiene un diccionario de rutas con 9 operaciones soportadas.
-- **WebhookProcessor**: Procesa webhooks entrantes con pipeline `parse_payload` → `validate_message` → `store_message`. Publica eventos SSE tras persistir.
-- **OutboundMessageAgent**: Centraliza operaciones salientes: `sendMessage`, `sendFile`, `sendQuickAnswer`, `transfer`.
-- **ConfigurationAgent**: Maneja configuración: `setWebhook`, `getWebhook`, `getBalance`, `getChannels`.
-
-### Skills
-
-- **Webhook Skills** (`services/webhook/`): `parse-payload`, `validate-message`, `store-message`.
-- **LiveConnect Skills** (`services/liveconnect/`): `send-message`, `send-file`, `send-quick-answer`, `transfer`, `set-webhook`, `get-webhook`, `get-balance`, `get-channels`.
-- **Infraestructura**: Token provider, response normalizer, realtime pub/sub.
-
-### Mapa de Capacidades Actualizado
-
-- `POST /webhook/liveconnect` → `MessageRouter` → `WebhookProcessor` → Webhook Skills → `store-message` (publica SSE)
-- `POST /sendMessage|/sendFile|/sendQuickAnswer|/transfer` → `MessageRouter` → `OutboundMessageAgent` → LiveConnect Skills
-- `POST /setWebhook|/getWebhook`, `GET /balance`, `GET /config/channels` → `MessageRouter` → `ConfigurationAgent` → LiveConnect Skills
-- `GET /conversations`, `GET /messages/<conversation_id>` permanecen como lecturas directas de Inbox/Repository.
-- `GET /events/stream` → Realtime Service (SSE pub/sub)
+`Pruebas LC/Messaging_platform` es un backend Flask que funciona como proxy hacia LiveConnect, expone una inbox web para operar conversaciones y persiste datos operativos en SQLite. La arquitectura actual usa un router interno de comandos, agentes por dominio y skills de integración con LiveConnect.
 
 ## Estructura del repositorio
-- `README.md`
-  Descripción general y advertencia de uso interno.
-- `Agents.md`
-  Documentación de agentes y skills.
+
 - `Pruebas LC/Messaging_platform/App.py`
-  Servidor Flask y rutas HTTP, coordina agentes.
+  Punto de entrada Flask y definición de rutas HTTP.
 - `Pruebas LC/Messaging_platform/core/`
-  Agentes principales: `message_router.py`, `webhook_processor.py`, `outbound_message_agent.py`, `configuration_agent.py`, `contracts.py`.
+  Agentes principales y contratos compartidos.
 - `Pruebas LC/Messaging_platform/services/`
-  Skills especializados: `webhook/` (parse, validate, store), `liveconnect/` (send_message, etc.), `realtime.py` (SSE pub/sub).
-- `Pruebas LC/Messaging_platform/Inbox/`
-  Lectura directa de conversaciones/mensajes desde SQLite.
+  Skills de webhook, LiveConnect y realtime SSE.
+- `Pruebas LC/Messaging_platform/services/webhook_service.py`
+  Wrapper de compatibilidad que delega al `WebhookProcessor`.
 - `Pruebas LC/Messaging_platform/DB/database.py`
-  Repositorio SQLite (`SQLiteRepository`) e inicialización de esquema.
+  Repositorio SQLite, esquema y helpers de persistencia.
+- `Pruebas LC/Messaging_platform/Inbox/`
+  Lecturas de conversaciones y mensajes.
 - `Pruebas LC/Messaging_platform/templates/index.html`
-  UI principal (Inbox web) con tema neon industrial.
+  UI principal de inbox.
 - `Pruebas LC/Messaging_platform/static/main.js`
-  Lógica frontend con delegación de eventos y SSE.
+  Lógica frontend, sincronización SSE y acciones UI.
 - `Pruebas LC/Messaging_platform/static/main.css`
-  Estilos con temas y animaciones neon.
+  Estilos y temas visuales.
 - `Pruebas LC/Messaging_platform/tests/`
-  Tests unitarios para agentes, skills y servicios.
-- `Pruebas LC/Messaging_platform/database.db`
-  Base SQLite con `conversations` y `messages`.
-- `skills-lock.json`
-  Configuración de skills disponibles.
+  Tests unitarios para rutas, webhook, repo y servicios.
 
-## Arquitectura y flujo de datos
+## Arquitectura actual
 
-```mermaid
-flowchart LR
-  UI["Inbox Web (index.html + main.js)"] -->|HTTP| MR["MessageRouter"]
-  MR --> WP["WebhookProcessor"]
-  MR --> OMA["OutboundMessageAgent"]
-  MR --> CA["ConfigurationAgent"]
-  WP -->|parse_payload, validate_message, store_message| Repo["SQLiteRepository"]
-  OMA -->|send_message, send_file, send_quick_answer, transfer| LC["LiveConnect API"]
-  CA -->|set_webhook, get_webhook, get_balance, get_channels| LC
-  LC -->|Webhook POST| WP
-  Repo -->|publish SSE| RT["Realtime Service"]
-  RT --> UI
-  Repo --> UI
+El backend organiza el flujo mediante `MessageRouter`, que delega a tres agentes:
+
+- `WebhookProcessor`: procesa webhooks entrantes.
+- `OutboundMessageAgent`: maneja operaciones salientes.
+- `ConfigurationAgent`: maneja configuración de webhook, balance y canales.
+
+### Comandos internos del router
+
+- `webhook.receive`
+- `message.send`
+- `message.send_quick_answer`
+- `message.send_file`
+- `conversation.transfer`
+- `config.set_webhook`
+- `config.get_webhook`
+- `config.balance`
+- `config.channels`
+
+## Flujo de webhooks
+
+El webhook entra por `POST /webhook/liveconnect` y sigue este pipeline:
+
+```text
+request JSON
+-> MessageRouter
+-> WebhookProcessor
+-> parse_payload
+-> validate_message
+-> store_message
+-> SQLiteRepository.save_message()
+-> publish("message.updated")
+-> SSE /events/stream
 ```
 
-### Flujos principales
-1. Inbox UI consulta `/conversations` y `/messages/<id>` para renderizar (lecturas directas).
-2. Acciones del usuario (sendMessage, sendQuickAnswer, transfer, balance) pasan por `MessageRouter` a `OutboundMessageAgent` o `ConfigurationAgent`, que delegan a skills de LiveConnect.
-3. Webhooks entran por `/webhook/liveconnect`, pasan por `MessageRouter` a `WebhookProcessor`, que ejecuta skills de webhook y persiste en SQLite, publicando eventos SSE para actualización en tiempo real.
-4. SSE stream en `/events/stream` permite sincronización evento-dirigida pura.
+### Reglas del pipeline
 
-## Backend (Flask)
-Archivo: `Pruebas LC/Messaging_platform/App.py`
+- `parse_payload()` normaliza payloads planos y payloads anidados del proveedor.
+- `validate_message()` rechaza payloads sin `id_conversacion`.
+- Los mensajes vacíos se marcan como ignorados solo si no traen contenido ni contexto suficiente.
+- `store_message()` intenta reconciliar la conversación por `celular` o `contact_name` antes de persistir.
+- Al guardar un mensaje se publica el evento SSE `message.updated`.
+- `services/webhook_service.process_incoming_webhook()` existe como wrapper para llamadas más antiguas o tests.
 
-El backend coordina agentes a través de `MessageRouter` para procesar operaciones HTTP.
+## Flujo saliente
 
-### Rutas
+Las operaciones salientes pasan por el router y luego por el agente correspondiente:
+
+- `POST /sendMessage` -> `OutboundMessageAgent.send_message()`
+- `POST /sendQuickAnswer` -> `OutboundMessageAgent.send_quick_answer()`
+- `POST /sendFile` -> `OutboundMessageAgent.send_file()`
+- `POST /transfer` -> `OutboundMessageAgent.transfer()`
+
+Cada skill:
+
+- obtiene token con `token_provider.build_headers()`
+- llama a la API `https://api.liveconnect.chat`
+- normaliza la respuesta
+- registra localmente el mensaje cuando aplica
+
+## Rutas HTTP actuales
+
+### UI
+
 - `GET /`
-  Render de `index.html`.
+  Renderiza `templates/index.html`.
+
+### Inbox y lectura directa
+
 - `GET /conversations`
-  Lista conversaciones desde SQLite (lectura directa).
+  Lista conversaciones desde SQLite.
 - `GET /messages/<conversation_id>`
-  Lista mensajes de conversación (lectura directa).
-- `GET /events/stream`
-  Stream SSE para sincronización evento-dirigida.
-- `POST /webhook/liveconnect`
-  Delega a `WebhookProcessor` para procesar y persistir webhooks.
-- `POST /sendMessage`
-  Delega a `OutboundMessageAgent` para enviar mensaje.
-- `POST /sendFile`
-  Delega a `OutboundMessageAgent` para enviar archivo.
-- `POST /sendQuickAnswer`
-  Delega a `OutboundMessageAgent` para enviar quick answer.
-- `POST /transfer`
-  Delega a `OutboundMessageAgent` para transferir conversación.
-- `POST /setWebhook`, `/config/setWebhook`
-  Delega a `ConfigurationAgent` para configurar webhook.
-- `POST /getWebhook`, `/config/getWebhook`
-  Delega a `ConfigurationAgent` para consultar webhook.
-- `GET /balance`, `/config/balance`
-  Delega a `ConfigurationAgent` para obtener balance.
+  Lista mensajes paginados de una conversación.
+
+### Configuración
+
+- `POST /setWebhook`
+- `POST /config/setWebhook`
+- `POST /getWebhook`
+- `POST /config/getWebhook`
+- `GET /balance`
+- `GET /config/balance`
 - `GET /config/channels`
-  Delega a `ConfigurationAgent` para listar canales.
-
-### Puntos clave
-- `init_db()` se ejecuta al importar el módulo, creando tablas si no existen.
-- `/webhook/liveconnect` retorna `400` cuando el payload es inválido.
-- La app corre en puerto `3000` (`app.run(port=3000)`).
-
-## Persistencia (SQLite)
-Archivo: `Pruebas LC/Messaging_platform/DB/database.py`
-
-### Tablas
-`conversations`
-- `id` (TEXT, PK)
-- `canal` (TEXT)
-- `updated_at` (DATETIME, default CURRENT_TIMESTAMP)
-
-`messages`
-- `id` (INTEGER, PK AUTOINCREMENT)
-- `conversation_id` (TEXT)
-- `sender` (TEXT)
-- `message` (TEXT)
-- `created_at` (DATETIME, default CURRENT_TIMESTAMP)
-
-### Notas de comportamiento
-- En el webhook, `sender` por defecto es `"usuario"` si no llega en payload.
-- Cada nuevo mensaje hace upsert de conversación y actualiza `updated_at`.
-- Lectura de mensajes ordena por `created_at ASC, id ASC` para estabilidad.
-
-## Módulos `metodos/` (proxy LiveConnect)
-Archivo clave: `Pruebas LC/Messaging_platform/metodos/Token.py`
-
-- Token caching global con expiración 8 horas (menos 1 minuto).
-- Credenciales hardcodeadas (`KEY`, `SECRET`) dentro del repo. Esto es sensible y justifica el uso interno.
-
-### Wrappers disponibles
-- `send_message(data)` → `/prod/proxy/sendMessage`
-- `send_quick_answer(data)` → `/prod/proxy/sendQuickAnswer`
-- `send_file(data)` → `/prod/proxy/sendFile`
-- `transfer(data)` → `/prod/proxy/transfer`
-- `get_balance()` → `/prod/proxy/balance`
-- `set_webhook(data)` → `/prod/proxy/setWebhook`
-- `get_webhook(id_canal)` → `/prod/proxy/getWebhook`
-
-Todos usan `PageGearToken` en headers.
-
-## Inbox Web (UI)
-Archivos:
-- `Pruebas LC/Messaging_platform/templates/index.html`
-- `Pruebas LC/Messaging_platform/static/main.js`
-- `Pruebas LC/Messaging_platform/static/main.css`
-
-### Funcionalidades
-- **Sidebar con conversaciones**: Actualiza por eventos SSE (no polling cada 5s como antes)
-- **Chat central con mensajes**: Sincronización en tiempo real via EventStream
-- **Indicador SSE visual**: 🟢 Conectado / 🔴 Sin conexión en panel de estado
-- **Botón "Actualizar" manual**: Refresco explícito sin esperar eventos (para fallback)
-- **Selector de temas (6 opciones)**: light, dark, sage, sunset, midnight-blue, **neon-industrial**
-- **Acciones UI** por `data-action` (sin `onclick` inline):
-  - `Saldo` → `/balance`
-  - `QuickAnswer` → `/sendQuickAnswer` con `id_respuesta` fijo
-  - `Transferir` → `/transfer` con `id_canal` fijo
-  - `refreshNow` → Refresco manual de conversaciones/mensajes
-
-### Tipografía y Estilo
-- **Font family**: `IBM Plex Mono`, `Courier Prime`, monospace (actualizado de Avenir Next / Segoe UI)
-- **Temas visuales**: 6 temas CSS con variables declarativas
-- **Neon Industrial (nuevo)**: Colores neon cyan/magenta, animaciones glow/glitch, grid retro backdrop
-- **Responsive**: Mobile-first, breakpoints adaptables
-- **Accesibilidad**: ARIA labels, semantic HTML, contrast ratios WCAG AA
-
-### Principios de diseño aplicados en frontend
-- **SRP**: Funciones separadas para render, API y eventos
-- **DRY**: Helper central para `fetch` GET/POST y validación de respuesta
-- **Event-Driven**: Sincronización via SSE, no polling sistemático
-- **Separation of Concerns**: HTML declara acciones; JS orquesta comportamiento
-- **Distinction**: UI retro-futurística inherentemente memorable (no genérica)
-
-### Sincronización Real-Time
-- **SSE (EventSource)**: Escucha `/events/stream`, recibe `message.updated` eventos
-- **Reconexión automática**: 3s si se desconecta, visible en console
-- **Logging detallado**: Console muestra estado SSE, eventos recibidos, errores
-- **Fallback manual**: Si SSE falla, usuario puede usar "Actualizar" (sin polling automático)
-
-### Observación clave
-- Al enviar `sendMessage`, no se inserta en SQLite, por lo que la conversación solo refleja mensajes entrantes (webhook), no los salientes, a menos que LiveConnect los devuelva vía webhook.
-
-## Testing automatizado
-Directorio: `Pruebas LC/Messaging_platform/tests/`
-
-### Suite actual
-- `test_webhook_pipeline.py` - Flujo completo webhook (parse, validate, store)
-- `test_repository.py` - Normalización y persistencia SQLite
-- `test_liveconnect_services.py` - Mocks de servicios LiveConnect
-- `test_realtime_service.py` - SSE y pub/sub
-- `test_webhook_service.py` - Validación y servicio webhook
-- `test_route_aliases.py` - Alias de rutas HTTP
-
-### Ejecución
-Desde `Pruebas LC/Messaging_platform/`:
-
-`python3 -m unittest discover -s tests -v`
-
-## Uso básico (manual)
-Desde `Pruebas LC/Messaging_platform/`:
-
-1. Crear entorno virtual y activar.
-2. Instalar deps: `Flask`, `requests`, `Flask-SQLAlchemy`.
-3. Ejecutar `App.py`.
-4. Abrir `http://localhost:3000/`.
-
-Nota: `requirements.txt` contiene una línea que parece un comando (`python3 -m pip install -r requirements.txt`). Si se usa pip, esa línea puede fallar. Lo correcto es que el archivo tenga solo paquetes.
-
-## Seguridad y consideraciones internas
-- Las credenciales (`KEY`, `SECRET`) están embebidas en `metodos/Token.py`.
-- Se almacenan mensajes y datos en `database.db` local.
-- El README advierte que es exclusivo para equipos internos.
-
-## Limitaciones conocidas / riesgos
-- Los mensajes enviados por el agente no se guardan localmente (solo webhook).
-- La UI aun depende de `id_canal` y `id_respuesta` fijos, aunque ahora estan centralizados en constantes de `main.js`.
-- `requirements.txt` no es estándar.
-
-## Mapa de endpoints (inputs esperados)
-Basado en `main.js` y `App.py`:
-
-- `/sendMessage`
-  Body: `{ id_conversacion, mensaje }`
-- `/sendQuickAnswer`
-  Body: `{ id_conversacion, id_respuesta, variables: {...} }`
-- `/transfer`
-  Body: `{ id_conversacion, id_canal, estado, mensaje }`
-- `/config/getWebhook`
-  Body: `{ id_canal }`
-- `/config/setWebhook`
-  Body: según API LiveConnect
-- `/config/balance`
-  Body: none
-- `/config/channels`
-  Query params opcionales (ejemplo: `visible=1`)
-- `/getWebhook`
-  Body: `{ id_canal }`
-- `/setWebhook`
-  Body: según API LiveConnect
-- `/webhook/liveconnect`
-  Body: `{ id_conversacion, mensaje, canal, sender }` (`id_conversacion` requerido)
-
-## Actualizacion funcional completa (19 de febrero de 2026)
-
-Esta seccion documenta las mejoras implementadas en webhook, persistencia, render frontend, envio de mensajes/archivos/quick answer y configuracion de webhook desde UI.
-
-### 1. Procesamiento del Webhook
-
-Archivo principal: `Pruebas LC/Messaging_platform/services/webhook_service.py`
-
-#### Estructura real del payload
-
-Ejemplo real recibido desde Proxy LiveConnect:
-
-```json
-{
-  "id_conversacion": "LCWAP|753|573178560023C",
-  "id_canal": 753,
-  "message": {
-    "texto": "",
-    "tipo": 1,
-    "file": {
-      "url": "https://storage.ejemplo.com/imagen.jpg",
-      "nombre": "imagen.jpg",
-      "extension": "jpg"
-    }
-  },
-  "contact_data": {
-    "name": "Brandon Gallego"
-  }
-}
-```
-
-#### Parseo aplicado
-
-- Texto: `message.texto`
-- Archivo: `message.file.url`, `message.file.name|nombre`, `message.file.ext|extension`
-- Contacto: `contact_data.name`
-
-Snippet relevante:
-
-```python
-def _extract_file_payload(data):
-    message_obj = _get_message_object(data)
-    file_obj = message_obj.get("file")
-    file_url = file_obj.get("url")
-    file_name = file_obj.get("name") or file_obj.get("nombre")
-    file_ext = file_obj.get("ext") or file_obj.get("extension")
-```
-
-#### Manejo de mensajes vacios
-
-- Si llega archivo, se construye un marcador persistible:
-  - `"[FILE]|url|nombre|extension"`
-- Si no hay texto ni archivo, el webhook se ignora:
-  - `{"status":"ignored","ok":true,"warning":"Mensaje vacio ignorado"}`
-
-Snippet relevante:
-
-```python
-def _build_incoming_message(message_text, file_payload):
-    file_marker = _build_file_marker(file_payload)
-    if file_marker:
-        return file_marker
-    if message_text:
-        return message_text
-    return ""
-```
-
-### 2. Persistencia de Mensajes
-
-Archivo: `Pruebas LC/Messaging_platform/DB/database.py`
-
-#### Funcionamiento de `save_message()`
-
-- Normaliza `conversation_id`, `sender`, `message`, `contact_name`.
-- Hace upsert de conversacion.
-- Inserta mensaje en `messages`.
-- Si no hay `message` textual pero hay archivo, usa fallback (`[Archivo]` o URL).
-- Rechaza insercion final si no hay contenido util.
-
-#### Campos almacenados
-
-Tabla `messages` actual:
-- `conversation_id`
-- `sender`
-- `message`
-- `message_type`
-- `file_url`
-- `file_name`
-- `file_ext`
-- `metadata`
-- `created_at`
-
-#### Diferencia de `sender`
-
-- `sender = "usuario"`: mensajes entrantes desde webhook.
-- `sender = "agent"`: mensajes enviados desde UI por `sendMessage`, `sendFile`, `sendQuickAnswer`.
-
-#### Convencion de archivos
-
-Para entrada por webhook se guarda:
-
-`[FILE]|url|nombre|extension`
-
-Ejemplo:
-
-`[FILE]|https://storage.ejemplo.com/imagen.jpg|imagen.jpg|jpg`
-
-### 3. Renderizado en Frontend
-
-Archivos:
-- `Pruebas LC/Messaging_platform/Inbox/messages.py`
-- `Pruebas LC/Messaging_platform/static/main.js`
-- `Pruebas LC/Messaging_platform/templates/index.html`
-
-#### Estructura devuelta por `get_messages`
-
-```json
-[
-  {
-    "sender": "usuario",
-    "message": "[FILE]|https://storage.ejemplo.com/imagen.jpg|imagen.jpg|jpg",
-    "message_type": "file",
-    "file_url": "https://storage.ejemplo.com/imagen.jpg",
-    "file_name": "imagen.jpg",
-    "file_ext": "jpg",
-    "metadata": {"tipo": 1}
-  }
-]
-```
 
-#### Deteccion de mensajes tipo archivo
+### Operaciones de conversación
 
-En `main.js` se parsea el prefijo:
+- `POST /sendMessage`
+- `POST /sendQuickAnswer`
+- `POST /sendFile`
+- `POST /transfer`
 
-```javascript
-function parseFileMessage(rawMessage) {
-  const normalized = normalizeText(rawMessage);
-  if (!normalized.startsWith("[FILE]|")) return null;
-  const parts = normalized.split("|");
-  return { url: normalizeText(parts[1]), name: normalizeText(parts[2]), extension: normalizeFileExtension(parts[3]) };
-}
-```
+### Webhook y realtime
 
-#### Render de tipos
+- `POST /webhook/liveconnect`
+- `GET /events/stream`
 
-- Texto normal: burbuja tradicional.
-- Imagen: tarjeta de archivo + URL clickeable + boton `Abrir archivo` (abre modal).
-- Otros archivos: tarjeta con boton `Descargar archivo`.
+### Endpoints auxiliares
 
-#### Modal flotante de imagen
+- `GET /users/list`
+- `GET /groups/list`
+- `POST /conversation/archive`
+- `POST /conversation/read`
+- `POST /proxy/sendMessage`
+- `POST /proxy/sendQuickAnswer`
+- `POST /proxy/sendFile`
+- `POST /proxy/transfer`
 
-`index.html` agrega `#imageModal` con:
-- Fondo oscuro.
-- Imagen centrada (`#imageModalImage`).
-- Link `Abrir en pestana nueva`.
-- Boton `Cerrar`.
+## Alias y compatibilidad
 
-`main.js` controla apertura/cierre con:
-- click en URL o boton abrir.
-- click fuera del contenido.
-- tecla `Esc`.
-- boton `Cerrar`.
+`App.py` mantiene aliases públicos y de compatibilidad:
 
-### 4. Envio de Mensajes
+- `/config/setWebhook` y `/setWebhook` ejecutan el mismo comando interno.
+- `/config/getWebhook` y `/getWebhook` ejecutan el mismo comando interno.
+- `/config/balance` y `/balance` ejecutan el mismo comando interno.
+- `/proxy/*` delega al mismo conjunto de comandos que las rutas directas de envío.
 
-Archivo: `Pruebas LC/Messaging_platform/metodos/SendMessage.py`
+Los tests `test_route_aliases.py` validan que los aliases expongan el mismo contrato.
 
-#### Implementacion `proxy/sendMessage`
+## Persistencia SQLite
 
-Payload enviado:
+La base vive en `Pruebas LC/Messaging_platform/database.db` y se inicializa al importar `App.py` mediante `init_db()`.
 
-```json
-{
-  "id_conversacion": "LCWAP|753|573178560023C",
-  "mensaje": "Hola"
-}
-```
+### Tablas reales
 
-#### Persistencia posterior
+#### `conversations`
 
-Cuando la API responde OK:
-- se guarda en DB como `sender = "agent"`.
-- se registra el texto enviado para verlo en el inbox local.
+- `id` `TEXT PRIMARY KEY`
+- `canal` `TEXT`
+- `contact_name` `TEXT`
+- `celular` `TEXT`
+- `archived` `INTEGER DEFAULT 0`
+- `last_message_at` `DATETIME DEFAULT CURRENT_TIMESTAMP`
+- `last_message_from` `TEXT DEFAULT 'client'`
+- `unread_count` `INTEGER DEFAULT 0`
+- `last_agent_response_at` `DATETIME`
+- `updated_at` `DATETIME DEFAULT CURRENT_TIMESTAMP`
 
-### 5. Envio de Archivos
+#### `messages`
 
-Archivo: `Pruebas LC/Messaging_platform/metodos/SendFile.py`
+- `id` `INTEGER PRIMARY KEY AUTOINCREMENT`
+- `conversation_id` `TEXT`
+- `sender` `TEXT`
+- `message` `TEXT`
+- `message_type` `TEXT DEFAULT 'text'`
+- `file_url` `TEXT`
+- `file_name` `TEXT`
+- `file_ext` `TEXT`
+- `metadata` `TEXT`
+- `created_at` `DATETIME DEFAULT CURRENT_TIMESTAMP`
 
-#### Implementacion `proxy/sendFile`
+#### `system_config`
 
-Payload oficial:
+- `key` `TEXT PRIMARY KEY`
+- `value` `TEXT`
 
-```json
-{
-  "id_conversacion": "LCWAP|753|573178560023C",
-  "url": "https://storage.ejemplo.com/documento.pdf",
-  "nombre": "documento",
-  "extension": "pdf"
-}
-```
+### Comportamiento del repositorio
 
-#### Validaciones frontend (`main.js`)
+- `save_message()` normaliza texto, canal, tipo de mensaje, adjuntos y metadata.
+- Una conversación se actualiza por `id` con `ON CONFLICT`.
+- `unread_count` aumenta para mensajes de cliente y se reinicia para mensajes de agente.
+- `last_agent_response_at` se actualiza cuando el sender es `agent`.
+- `last_message_from` queda normalizado como `client`, `agent` o `system`.
+- `save_balance()` cachea el saldo en `system_config`.
+- `get_messages()` devuelve paginación con `cursor`, `next_cursor` y `has_more`.
 
-- URL obligatoria y valida (`http://` o `https://`).
-- Nombre obligatorio.
-- Extension dentro de `ALLOWED_FILE_EXTENSIONS`.
-- Se permite inferir extension desde URL cuando aplica.
+## Skills de LiveConnect
 
-#### Persistencia local
+### Webhook
 
-Cuando el envio es exitoso:
-- `sender = "agent"`
-- `message_type = "file"`
-- se guarda `file_url`, `file_name`, `file_ext`, `metadata`.
+- `parse-payload`
+- `validate-message`
+- `store-message`
 
-### 6. QuickAnswer Dinamico
+### Outbound
 
-Archivo: `Pruebas LC/Messaging_platform/metodos/SendQuickAnswer.py`
+- `send-message`
+- `send-file`
+- `send-quick-answer`
+- `transfer`
 
-#### Uso de `id_respuesta`
+### Configuración
 
-- Se valida que sea numerico (`int`).
-- Se envia junto a `id_conversacion` y `variables`.
+- `set-webhook`
+- `get-webhook`
+- `get-balance`
+- `get-channels`
+
+### Soporte
+
+- `token_provider`
+- `response_normalizer`
+- `users`
+- `realtime`
 
-#### Variables dinamicas
+## Integración con LiveConnect
 
-- `variables` debe ser objeto JSON.
-- Se acepta texto con placeholders para construir un registro visual dinamico.
+### Token
 
-#### Persistencia visual
+`services/liveconnect/token_provider.py` obtiene `PageGearToken` usando `LIVECONNECT_KEY` y `LIVECONNECT_SECRET`. El token se cachea hasta casi su expiración.
 
-Al responder OK:
-- se guarda en DB como `sender = "agent"`.
-- el texto se construye por prioridad:
-  1. plantilla custom (`registro_visual` / `mensaje_visual`)
-  2. texto detectado en respuesta API
-  3. fallback `QuickAnswer {id}` + resumen de variables
+### Endpoints remotos usados
 
-### 7. Configuracion del Webhook desde UI
+- `POST /prod/account/token`
+- `POST /prod/proxy/sendMessage`
+- `POST /prod/proxy/sendFile`
+- `POST /prod/proxy/sendQuickAnswer`
+- `POST /prod/proxy/transfer`
+- `POST /prod/proxy/setWebhook`
+- `POST /prod/proxy/getWebhook`
+- `GET /prod/proxy/balance`
+- `GET /prod/channels/list`
+- `GET /prod/users/list`
+- `GET /prod/groups/list`
 
-Archivos:
-- `Pruebas LC/Messaging_platform/templates/index.html`
-- `Pruebas LC/Messaging_platform/static/main.js`
-- `Pruebas LC/Messaging_platform/metodos/GetWebhook.py`
+### Normalización de respuestas
+
+`normalize_json_response()` considera exitosa una respuesta HTTP 200 con payload vacío o con `status == 1`.
+
+## Realtime SSE
+
+`services/realtime.py` implementa un pub/sub en memoria para SSE.
+
+### Comportamiento
+
+- `subscribe()` registra un consumidor con cola acotada.
+- `publish()` difunde eventos a todos los suscriptores.
+- `format_sse()` serializa eventos con `event:` y `data:`.
+- `GET /events/stream` emite `retry: 2000`, luego `stream.ready` al conectar y `stream.heartbeat` cuando no hay eventos.
+- La conexión se limpia con `unsubscribe()` al cerrar el stream.
+- El frontend usa reconexión automática y refresco manual.
+
+## Frontend
+
+La interfaz principal vive en `templates/index.html` y `static/main.js`.
+
+### Estado actual visible
+
+- Sidebar con estado SSE.
+- Lista de conversaciones.
+- Panel de chat.
+- Configuración de webhook y balance.
+- Composer para mensajes, quick answers y archivos.
+- Acciones de conversación: archivar, marcar leído y transferir.
+- Botón manual de refresco para sincronización inmediata.
+
+### Integraciones frontend
+
+- `GET /conversations`
+- `GET /messages/<conversation_id>`
+- `GET /events/stream`
+- `POST /sendMessage`
+- `POST /sendQuickAnswer`
+- `POST /sendFile`
+- `POST /transfer`
+- `POST /config/setWebhook`
+- `POST /config/getWebhook`
+- `GET /balance`
+- `GET /config/channels`
+- `POST /conversation/archive`
+- `POST /conversation/read`
+- `GET /users/list`
+- `GET /groups/list`
+
+### Estado del tema
+
+- En el código actual solo está disponible el tema `dark`.
+- `THEMES` contiene un único valor.
+- El selector de temas y los swatches quedan reducidos a una sola opción.
+
+## Servicios auxiliares
+
+- `Inbox/conversations.py` delega en el repositorio para listar conversaciones.
+- `Inbox/messages.py` normaliza el formato de mensajes antes de devolverlo al frontend.
+- `services/liveconnect/users.py` consulta usuarios y grupos remotos con filtros opcionales.
+- `services/liveconnect/balance.py` obtiene el saldo y lo cachea localmente.
+- `services/liveconnect/channels.py` consulta los canales visibles del proveedor.
+
+## Inconsistencias críticas detectadas
+
+- El wiki anterior mencionaba una arquitectura con múltiples temas visuales y un selector con seis opciones; el frontend actual solo registra `dark`.
+- El wiki anterior decía que `WebhookProcessor` publicaba SSE tras persistir, lo cual es correcto, pero omitía que el evento concreto es `message.updated`.
+- El wiki anterior no documentaba rutas reales presentes en `App.py`, como `/users/list`, `/groups/list`, `/conversation/archive`, `/conversation/read` y los aliases `/proxy/*`.
+- El wiki anterior describía un esquema SQLite más simple; la implementación actual incluye `contact_name`, `celular`, `archived`, `last_message_at`, `last_message_from`, `unread_count`, `last_agent_response_at` y `system_config`.
+- El wiki anterior no reflejaba que `GET /messages/<conversation_id>` usa paginación con cursor.
+- El wiki anterior no reflejaba que `ConfigurationAgent.get_webhook()` requiere `id_canal`.
+- El wiki anterior no dejaba claro que `services/webhook_service.py` es solo un wrapper de compatibilidad, no el pipeline principal.
+
+## Archivos relevantes
+
 - `Pruebas LC/Messaging_platform/App.py`
-
-#### `proxy/setWebhook` (activar/desactivar)
-
-- Botones:
-  - `Activar Proxy`
-  - `Desactivar Proxy`
-- Requieren `id_canal`.
-- Para activar, `url` es obligatoria.
-
-#### Nuevo boton de consulta `proxy/getWebhook`
-
-Boton en modal de configuracion:
-- `Consultar Webhook`
-
-Flujo:
-1. toma `id_canal` del selector/campo manual.
-2. llama `POST /config/getWebhook`.
-3. renderiza en UI:
-   - `Estado actual` (activo/inactivo/eliminado/desconocido)
-   - `URL configurada`
-   - `Mensaje API`
-4. mantiene JSON completo en `#webhookResult`.
-
-Snippet de presentacion:
-
-```javascript
-renderWebhookCheckSummary({
-  estado: "activo",
-  url: "https://mi-webhook.com/liveconnect",
-  mensaje: "Consulta completada"
-});
-```
-
-### 8. Flujo general del sistema
-
-```mermaid
-flowchart LR
-  Canal["Canal (ej. WhatsApp)"] --> Proxy["Proxy LiveConnect"]
-  Proxy -->|Webhook POST| Flask["Flask /webhook/liveconnect"]
-  Flask --> Service["webhook_service.py"]
-  Service --> DB["SQLite (conversations/messages)"]
-  DB --> API["GET /conversations /messages/<id>"]
-  API --> Front["Frontend Inbox (index.html + main.js)"]
-```
-
-Paso a paso:
-1. El canal envia evento al Proxy.
-2. Proxy publica el webhook al backend Flask.
-3. El servicio parsea texto, archivo y contacto.
-4. Se persiste en SQLite.
-5. El frontend consulta mensajes por API interna.
-6. Se renderiza texto/archivo/link/metadata.
-7. Las acciones del agente (`sendMessage`, `sendFile`, `sendQuickAnswer`) se proxyan y se persisten para vista inmediata.
-
-## Referencias
-- `Agents.md` - Documentación de agentes y skills.
-- `/.agents/docs/Architecture.md` - Arquitectura general.
-- `/.agents/docs/SkillsIndex.md` - Índice de skills.
-- `/.agents/Skills/skill-proxy-lc/SKILL.md` - Skill específico del proxy LiveConnect.
-- `Pruebas LC/Messaging_platform/tests/` - Suite de tests unitarios.
+- `Pruebas LC/Messaging_platform/core/message_router.py`
+- `Pruebas LC/Messaging_platform/core/webhook_processor.py`
+- `Pruebas LC/Messaging_platform/core/outbound_message_agent.py`
+- `Pruebas LC/Messaging_platform/core/configuration_agent.py`
+- `Pruebas LC/Messaging_platform/services/webhook/parse_payload.py`
+- `Pruebas LC/Messaging_platform/services/webhook/validate_message.py`
+- `Pruebas LC/Messaging_platform/services/webhook/store_message.py`
+- `Pruebas LC/Messaging_platform/services/liveconnect/*.py`
+- `Pruebas LC/Messaging_platform/DB/database.py`
+- `Pruebas LC/Messaging_platform/Inbox/*.py`
+- `Pruebas LC/Messaging_platform/static/main.js`
+- `Pruebas LC/Messaging_platform/templates/index.html`
+- `Pruebas LC/Messaging_platform/tests/*.py`
